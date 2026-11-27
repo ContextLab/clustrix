@@ -86,8 +86,7 @@ automatically, at first use. Changing directory afterwards does not reload it.
    placeholder is right for *where clustrix looks*, and wrong here: under a
    ``CLUSTRIX_CONFIG_DIR`` redirect it stands for a directory somebody else
    chose, so a sentence about authorising a host would be pointing at a
-   file the redirector controls. Quickstart says ``~/.clustrix/.env`` for
-   the same reason.
+   file the redirector controls.
 
    ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
    that list, however obvious they look. See the next paragraph.

@@ -1835,8 +1835,9 @@ def test_the_documented_remedy_names_a_file_the_reader_controls():
     looks*, and wrong in the sentence that tells a reader which file
     authorises a host: ``CLUSTRIX_CONFIG_DIR`` is exactly the thing a hostile
     repository sets, so the remedy would have pointed at a file the
-    redirector controls. Quickstart already spelled it out; the two pages
-    have to say the same thing.
+    redirector controls. Quickstart no longer discusses the credential file
+    at all (this test used to require that it name ``~/.clustrix/.env``);
+    what still has to hold is that neither page uses the placeholder.
     """
     docs = pathlib.Path(__file__).resolve().parents[2] / "docs" / "source"
     configuration = (docs / "configuration.rst").read_text(encoding="utf-8")
@@ -1844,7 +1845,7 @@ def test_the_documented_remedy_names_a_file_the_reader_controls():
 
     assert "``<config dir>/.env``" not in configuration
     assert "``~/.clustrix/.env``" in configuration
-    assert "``~/.clustrix/.env``" in quickstart
+    assert "``<config dir>/.env``" not in quickstart
 
 
 # --------------------------------------------------------------------------

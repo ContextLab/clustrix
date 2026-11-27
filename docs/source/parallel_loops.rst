@@ -152,12 +152,37 @@ trigger it.
        loop variable)
      - ``last is assigned in the loop and used after it, which depends on
        which iteration ran last``
-   * - A write to a global or nonlocal
-     - ``COUNT is a global or nonlocal the loop assigns``
-   * - The global ``random`` or ``numpy.random`` generator, unseeded
-     - ``random.random() draws from a random generator shared by all
-       iterations, so each draw depends on the ones before it; create one per
-       iteration instead, e.g. rng = np.random.default_rng(seed + i)``
+   * - A change to something the function did not create (a module-level
+       list, array or object; a variable of an enclosing function)
+     - ``RESULTS is not created in this function and the loop changes it; a
+       change made in a worker would be lost. Create it inside the function
+       and return it``
+   * - The global ``random`` or ``numpy.random`` generator, **including
+       seeding it** in each iteration
+     - ``random.seed() uses a random generator shared by the whole process, so
+       what it returns and what it leaves behind depend on the order of the
+       iterations; create one per iteration instead, e.g. rng =
+       np.random.default_rng(seed + i)``
+   * - A function defined before the loop that reads a variable the loop, or
+       the code after it, assigns
+     - ``a function defined before the loop reads total, which is assigned
+       again in or after the loop; it would go on seeing the old value``
+   * - ``for box.last in xs`` -- a loop target that is not a plain variable
+     - ``the loop assigns each item to box.last, which is not a plain
+       variable, so every iteration writes to the same place``
+
+Some functions are not analysed at all, and ``explain`` says ``not analysed``
+with the reason:
+
+* a function containing a ``global`` or ``nonlocal`` statement, anywhere;
+* a function wrapped by another decorator (``@cluster`` on top of
+  ``@functools.wraps``-style wrapper): the split would be made from the inner
+  function's source and skip the wrapper. Put ``@cluster`` directly on the
+  function that has the loop;
+* a method that uses ``super()`` or a class-private name (``self.__x``);
+* a function whose file was edited after it was imported, so the source on
+  disk is no longer the code that runs;
+* a generator, a coroutine, a ``functools.partial``, a callable object.
 
 A function whose loop is not divided still runs, as one unit. Locally, a
 warning says that ``cores`` had no effect for that function.
@@ -261,13 +286,17 @@ What is checked while the loop runs
 -----------------------------------
 
 Reading source code can show that a loop is unsafe to divide. It cannot show
-that one is safe, because it cannot see what a called function does. Three
+that one is safe, because it cannot see what a called function does. These
 checks on real values run behind the source analysis:
 
 Aliasing
-   Before any piece is sent, the values the body reads are searched for a
-   reference to an object the loop collects into (``seen = out`` followed by
-   ``out.append(f(seen, x))``).
+   Before any piece is sent, everything the body reads -- its values, the
+   items, and a generator it loops over -- is searched for any object that
+   can also be reached from what the loop collects into (``seen = out``
+   followed by ``out.append(f(seen, x))``). The search follows containers,
+   attributes, closures, classes and NumPy object arrays. It visits at most
+   five million objects; beyond that the loop runs in order, because an
+   unfinished search has shown nothing.
 
 Mutation
    Each piece fingerprints the values it reads and the items it was given,
@@ -278,9 +307,20 @@ Hidden randomness
    The state of the global ``random`` and NumPy generators is compared around
    each piece, which catches a helper that draws from them.
 
+Identity
+   An object that existed before the loop is not copied into what the loop
+   collects: ``out.append(row)`` collects ``row`` itself, so a later
+   ``row.append(1)`` shows in ``out`` exactly as in a sequential run. This
+   holds for objects found through lists, tuples, dict values and attributes;
+   it does not hold for the elements of a set or the keys of a dict. A value
+   that cannot be copied between processes (a generator, a lock), and a
+   function created in the loop that reads the loop's variables and is kept
+   afterwards, both abandon the split.
+
 When a check fails, the split is abandoned and the original loop runs once,
 in order. The code before the loop is not run a second time. A warning says
-why:
+why, and says so when the failed attempt had already run the loop's side
+effects once:
 
 .. code-block:: python
 
@@ -302,7 +342,7 @@ why:
 
 .. code-block:: text
 
-   WARNING clustrix.decorator: mutates_shared: not split -- the loop changed the items being looped over, which its iterations share
+   WARNING clustrix.decorator: mutates_shared: not split -- the loop changed the items being looped over, which its iterations share. That was found after the loop had been run in pieces, so anything it does besides computing (writing a file, calling a service) happened in that attempt as well. The loop ran in order instead, so the result is the one a direct call gives. It will not be divided again in this session; pass parallel=False to say so in the code.
    [2, 2, 2, 2]
 
 .. _parallel-loops-unseen:
@@ -316,7 +356,12 @@ lives anywhere else:
 * a module-level cache or counter that a called function updates,
 * a library's internal state,
 * files and databases,
-* a GPU's random state.
+* a GPU's random state,
+* process-wide settings made before the loop -- ``decimal.getcontext().prec``,
+  the working directory, an environment variable set inside the function --
+  which a worker process does not have,
+* an object whose pickle leaves its state out (a custom ``__getstate__``):
+  pickling is how a change is noticed.
 
 Such side effects still happen once per iteration, but in an unspecified
 order across pieces, and in a different process from the caller. In a local
@@ -325,6 +370,16 @@ empty in the calling process, because the writes happened in the workers.
 
 If the iterations of your loop communicate through anything other than the
 names the table above describes, turn the feature off for that function.
+
+When an iteration raises
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The exception that reaches you is the one from the earliest failing
+iteration, as in a sequential run. Locally, if the loop collects into
+something the caller passed in, the loop is run again in order in the calling
+process, so that object holds what was collected before the error, as it
+would after a direct call. On a cluster the caller's objects are never
+touched, with or without a split.
 
 Turning it off
 --------------

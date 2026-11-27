@@ -29,6 +29,7 @@ import traceback
 import pytest
 
 from clustrix import cluster, configure, get_config
+from clustrix import decorator as decorator_module
 from clustrix.executor import ClusterExecutor
 from clustrix.executor_scheduler_status import RemoteTraceback
 from clustrix.utils import serialize_function
@@ -584,6 +585,9 @@ def test_a_split_found_unsafe_on_the_cluster_falls_back_to_the_direct_answer(
     """Each chunk reports that it changed a value its iterations share; the
     loop is then run again whole, in order, as one job."""
     configure(max_parallel_jobs=2)
+    # An abandoned split is remembered per function *source*, and this
+    # function is defined afresh for each backend from the same source.
+    decorator_module._ABANDONED.clear()
 
     def tallied(values, counter):
         def bump(amount):
