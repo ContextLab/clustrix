@@ -335,6 +335,11 @@ was not is marked.
   in an Ubuntu 24.04 container and then the real-world suite. Not yet run on
   GitHub: that the hosted runner behaves like the container the suite was
   developed in is inferred.
+- Historical documents about features that no longer exist, which named
+  tests and scripts that are gone: `docs/aws/`, `docs/gpu/`, `docs/notes/`,
+  the issue-66 and issue-71 summaries, the complexity-threshold analysis,
+  the finished mock-migration guide, and the `coverage_improvement` issue
+  template. Git history has them.
 
 ### Security
 

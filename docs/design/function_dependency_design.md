@@ -90,7 +90,6 @@ handling), were TODOs inside this machinery. They are closed, not implemented:
 implementing them would have meant building on a foundation that never held
 weight.
 
-See also `COMPLEXITY_THRESHOLD_ANALYSIS.md`, which recorded the symptom that
-originally motivated flattening — jobs failing above a complexity threshold with
-`result_raw.pkl not found`. That symptom had a different cause, in the two-venv
-handoff, and was fixed there.
+The symptom that originally motivated flattening was jobs failing above a
+certain function size with `result_raw.pkl not found`. That had a different
+cause, in the two-venv handoff, and was fixed there.

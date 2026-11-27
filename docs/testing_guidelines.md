@@ -299,19 +299,24 @@ pytest --cov=clustrix --cov-report=html
 
 ### Using Test Infrastructure
 
+The real-world tests run against a real `sshd` and a single-node SLURM on
+this machine, which one script builds (Ubuntu 24.04, as root):
+
 ```bash
-# Bring the local services up (SSH server, SLURM)
-python tests/infrastructure/setup_test_infrastructure.py setup
+bash scripts/setup_local_slurm.sh
 
-# See what is running
-python tests/infrastructure/setup_test_infrastructure.py status
-
-# Run against them
-pytest tests/real_world/
-
-# Take them down again
-python tests/infrastructure/setup_test_infrastructure.py teardown
+export CLUSTRIX_TEST_SSH_HOST=127.0.0.1 CLUSTRIX_TEST_SSH_PORT=2222
+export CLUSTRIX_TEST_SSH_USER=clx
+export CLUSTRIX_TEST_SSH_KEY=/tmp/clustrix-local-cluster/id_ed25519
+pytest tests/real_world/ -m real_world
 ```
+
+The cluster is shared by everything on the machine that uses it. Cancel the
+job ids and stop the processes you started; never clean up wholesale
+(`scancel -u clx`).
+
+`tests/infrastructure/` is a separate Docker SSH container, used only by
+`tests/comprehensive/`.
 
 ### Running the real-world test runner
 
