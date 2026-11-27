@@ -97,14 +97,19 @@ class TestRejectedValues:
     def test_nonsense_walltime_is_rejected(self):
         assert "not a duration" in _problems(_widget("slurm", time="soon"))
 
-    @pytest.mark.parametrize("memory", ["64", "0GB", "0", "-4GB", "GB"])
-    def test_a_memory_size_needs_a_unit_and_an_amount(self, memory):
-        """``64`` used to be accepted here (it was a case of
-        ``test_recognised_memory_sizes``). The form now asks for the unit,
-        deliberately. Note that the library itself is not undecided about a
-        bare number: ``clustrix.utils.normalize_memory("64", "slurm")`` is
-        ``"64G"``, and ``configure(default_memory="64")`` still works."""
+    @pytest.mark.parametrize("memory", ["0GB", "0", "-4GB", "GB"])
+    def test_a_memory_size_needs_an_amount_above_zero(self, memory):
         assert "is not a size" in _problems(_widget("slurm", ram=memory))
+
+    def test_a_bare_number_of_memory_is_gigabytes_as_in_the_library(self):
+        """The form briefly demanded a unit. The library does not:
+        ``clustrix.utils.normalize_memory("64", "slurm")`` is ``"64G"``, so
+        refusing ``64`` here made a profile that clustrix accepts impossible
+        to apply from the widget."""
+        from clustrix.utils import normalize_memory
+
+        assert normalize_memory("64", "slurm") == "64G"
+        assert _problems(_widget("slurm", ram="64")) == ""
 
     def test_empty_walltime_is_rejected(self):
         assert "A time limit is required" in _problems(_widget("slurm", time=""))

@@ -227,22 +227,6 @@ class TestWhatTheUserIsTold:
 
         assert not _sentinels_in(told), told
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "PRODUCT GAP, not a test problem. Environment variables are "
-            "withheld from disk whole, exactly like a password, so they are "
-            "gone after a restart -- but the only notice of that is "
-            "ProfileManager's 'Profiles are not a credential store' warning, "
-            "and ModernClustrixWidget._save_profile suppresses it with "
-            "warnings.filterwarnings('ignore', ...). The password and token "
-            "fields are labelled 'this session only'; the environment "
-            "variables box is not, and Apply prints 'Saved to the profile'. "
-            "The same call is what tests/unit/test_no_silent_swallows.py::"
-            "test_the_lint_finds_no_unrecorded_silent_swallow reports. Remove "
-            "this marker when the form or the console says so."
-        ),
-    )
     def test_the_user_learns_that_environment_variables_are_not_kept(self, capsys):
         import warnings
 

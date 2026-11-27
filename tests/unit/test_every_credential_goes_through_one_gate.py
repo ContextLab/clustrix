@@ -1067,6 +1067,12 @@ PROVENANCE_GOVERNED_READER_ALLOWLIST = {
     ("ssh_host_key_policy", "config.py", "_validate_config_values"),
     ("ssh_host_key_policy", "ssh_security.py", "host_key_policy_name"),
     ("hf_image", "hf_jobs.py", "HFJobsManager._image"),
+    # Not readers: NOT_APPLIED_FROM_A_PROFILE names both so that the widget's
+    # Apply can *leave them out* of what it passes to configure(). Forwarding
+    # a profile's value there would turn "a file said so" into "the user
+    # said so", which is the laundering this rule exists to prevent.
+    ("ssh_host_key_policy", "modern_notebook_widget.py", ""),  # module scope
+    ("hf_image", "modern_notebook_widget.py", ""),  # module scope
 }
 
 

@@ -764,7 +764,6 @@ class TestAProfileSettingWithNoControlIsCarried:
             **SETTINGS_WITH_NO_CONTROL,
         )
 
-    @pytest.mark.xfail(strict=True, reason=REASON)
     def test_it_reaches_the_live_configuration(self, capsys):
         widget = self._widget()
 
@@ -774,7 +773,6 @@ class TestAProfileSettingWithNoControlIsCarried:
         assert get_config().cluster_host == "hpc.example.edu"
         assert _uncontrolled(get_config()) == SETTINGS_WITH_NO_CONTROL
 
-    @pytest.mark.xfail(strict=True, reason=REASON)
     def test_it_is_still_in_the_profile_after_apply(self, capsys):
         widget = self._widget()
 
@@ -783,7 +781,6 @@ class TestAProfileSettingWithNoControlIsCarried:
         kept = widget.profile_manager.load_profile("Under test")
         assert _uncontrolled(kept) == SETTINGS_WITH_NO_CONTROL
 
-    @pytest.mark.xfail(strict=True, reason=REASON)
     def test_a_duplicate_has_it_too(self):
         widget = self._widget()
 

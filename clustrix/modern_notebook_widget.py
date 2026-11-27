@@ -103,6 +103,14 @@ WIDGET_MANAGED_FIELDS = frozenset(
 )
 
 
+#: Profile settings Apply never forwards to ``configure()``. Both weaken a
+#: check -- host-key verification, and which container image is handed the
+#: HuggingFace token -- and clustrix honours them only from a configuration
+#: source it trusts. ``configure()`` *is* such a source, so passing a
+#: profile's value through it would turn "a file said so" into "the user
+#: said so". They stay in the profile; setting them is done in code.
+NOT_APPLIED_FROM_A_PROFILE = frozenset({"ssh_host_key_policy", "hf_image"})
+
 #: A shell-safe environment variable name.
 ENVIRONMENT_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -360,7 +368,7 @@ class ModernClustrixWidget:
         w["backend_hint"] = widgets.HTML()
         w["backend_hint"].add_class("cx-hint")
         w["cpus"] = widgets.IntText(description="CPUs per job", value=1)
-        w["ram"] = self._text("Memory per job", "16GB")
+        w["ram"] = self._text("Memory per job", "e.g. 16GB")
         w["time"] = self._text("Time limit per job", "HH:MM:SS")
         w["partition"] = self._text("Partition", "the scheduler's default")
 
@@ -431,7 +439,7 @@ class ModernClustrixWidget:
             indent=False,
         )
         w["env_vars"] = widgets.Textarea(
-            description="Environment variables",
+            description="Environment variables (this session only, never saved)",
             placeholder="KEY=value, one per line",
             rows=3,
             continuous_update=False,
@@ -892,14 +900,51 @@ class ModernClustrixWidget:
     # -- profiles ----------------------------------------------------------
 
     def _save_profile(self, name: str, config: ClusterConfig) -> None:
-        with warnings.catch_warnings():
-            # ProfileManager warns that secrets are not written to disk. The
-            # password and token fields say so themselves, and in a notebook
-            # the warning lands as a red block above the form.
-            warnings.filterwarnings(
-                "ignore", message="Profiles are not a credential store"
-            )
+        """Save ``config`` as profile ``name``.
+
+        ProfileManager warns, once, that secrets are not written to disk. In
+        a notebook a warning lands as a red block above the form, away from
+        where the user is looking, so that one warning is taken out of the
+        stream here and said in the console instead -- by
+        ``_session_only_note``, on every Apply rather than once. Any other
+        warning is passed on untouched.
+        """
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             self.profile_manager.save_profile(name, config)
+        for warning in caught:
+            if "Profiles are not a credential store" not in str(warning.message):
+                warnings.warn_explicit(
+                    warning.message,
+                    warning.category,
+                    warning.filename,
+                    warning.lineno,
+                )
+
+    def _session_only_note(self) -> Optional[str]:
+        """Name what Apply did *not* write to disk, if anything.
+
+        Passwords, tokens and environment variables are withheld from the
+        profile store: clustrix cannot tell a setting from a credential in a
+        variable's value, so it writes none of them.
+        """
+        w = self.widgets
+        held = [
+            label
+            for label, value in (
+                ("the password", w["password"].value),
+                ("the token", w["hf_token"].value),
+                ("environment variables", w["env_vars"].value.strip()),
+            )
+            if value
+        ]
+        if not held:
+            return None
+        return (
+            "Kept for this session only, never written to disk: "
+            + ", ".join(held)
+            + "."
+        )
 
     def _update_profile_dropdown(self) -> None:
         """Re-read the profile names; the active profile stays selected."""
@@ -1250,6 +1295,16 @@ class ModernClustrixWidget:
                     self._config_data_for_backend(),
                     reset_fields=WIDGET_MANAGED_FIELDS,
                 )
+                # What the profile sets that has no control here goes live
+                # with it, where it differs from the default; a setting made
+                # from code that the profile has no opinion on is left alone.
+                defaults = asdict(ClusterConfig())
+                for field, value in self._settings_without_a_control().items():
+                    if (
+                        field not in NOT_APPLIED_FROM_A_PROFILE
+                        and value != defaults[field]
+                    ):
+                        settings[field] = value
                 configure(**settings)
             except (ValueError, TypeError, OSError) as e:
                 print(f"Not applied: {e}")
@@ -1274,6 +1329,9 @@ class ModernClustrixWidget:
                 )
             if name:
                 print(f"Saved to the profile '{name}'.")
+            note = self._session_only_note()
+            if note:
+                print(note)
             if unrecognised:
                 print("Ignored, not a clustrix setting: " + ", ".join(unrecognised))
             self.set_status("ok", "applied")
@@ -1521,12 +1579,16 @@ class ModernClustrixWidget:
             matched = MEMORY_PATTERN.match(memory)
             if not memory:
                 problems.append(("ram", "Memory is required"))
-            elif not matched or not matched.group(2) or float(matched.group(1)) <= 0:
+            elif not matched or float(matched.group(1)) <= 0:
+                # A bare number is accepted: clustrix reads it as gigabytes
+                # everywhere else (utils.normalize_memory), and refusing here
+                # what the library accepts would make a valid profile
+                # impossible to apply from the form.
                 problems.append(
                     (
                         "ram",
-                        f"Memory {memory!r} is not a size; expected a number "
-                        "and a unit, like '16GB' or '512MB'",
+                        f"Memory {memory!r} is not a size; expected something "
+                        "like '16GB' or '512MB', above zero",
                     )
                 )
 
@@ -1679,13 +1741,35 @@ class ModernClustrixWidget:
                     data[name] = defaults[name]
         return data
 
+    def _settings_without_a_control(self) -> Dict[str, Any]:
+        """What the selected profile holds that the form cannot show.
+
+        ``ClusterConfig`` has many more fields than there are controls. A
+        profile that sets one -- a poll interval, a setup timeout -- must
+        keep it through Apply and Duplicate, which rebuild the profile from
+        the form.
+        """
+        name = self.widgets["profile_dropdown"].value
+        if name not in self.profile_manager.get_profile_names():
+            return {}
+        saved = asdict(self.profile_manager.load_profile(name))
+        return {
+            field: value
+            for field, value in saved.items()
+            if field not in WIDGET_MANAGED_FIELDS
+        }
+
     def _config_for_backend(self) -> ClusterConfig:
         """The configuration a test or a job started from this form uses."""
-        return ClusterConfig(**self._config_data_for_backend())
+        return ClusterConfig(
+            **{**self._settings_without_a_control(), **self._config_data_for_backend()}
+        )
 
     def _get_config_from_widgets(self) -> ClusterConfig:
-        """The configuration currently shown, as a ClusterConfig."""
-        return ClusterConfig(**self._config_data_from_widgets())
+        """The profile as it would be saved: the form over what it cannot show."""
+        return ClusterConfig(
+            **{**self._settings_without_a_control(), **self._config_data_from_widgets()}
+        )
 
     def _config_data_from_widgets(self) -> Dict[str, Any]:
         """The configuration currently shown, as the fields the widget set.
@@ -1766,14 +1850,21 @@ class ModernClustrixWidget:
         # is authoritative; everything reaching here has passed
         # SUPPORTED_CLUSTER_TYPES already.
         w["cluster_type"].value = data["cluster_type"]
-        w["cpus"].value = data.get("default_cores") or defaults.default_cores
+
+        def number(field: str, fallback: int) -> int:
+            # `or` would turn a draft's 0 into the default; only a missing
+            # value falls back.
+            value = data.get(field)
+            return fallback if value is None else value
+
+        w["cpus"].value = number("default_cores", defaults.default_cores)
         w["ram"].value = str(data.get("default_memory") or defaults.default_memory)
         w["time"].value = str(data.get("default_time") or defaults.default_time)
         w["partition"].value = data.get("default_partition") or ""
 
         # SSH
         w["host"].value = data.get("cluster_host") or ""
-        w["port"].value = data.get("cluster_port") or defaults.cluster_port
+        w["port"].value = number("cluster_port", defaults.cluster_port)
         w["username"].value = data.get("username") or ""
         w["password"].value = data.get("password") or ""
         # Empty, never a placeholder path: a key file that is set is tried

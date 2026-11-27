@@ -956,6 +956,16 @@ class ProfileManager:
         profiles_section = data["profiles"]
         for name, config_dict in profiles_section.items():
             try:
+                if not isinstance(name, str) or not name.strip():
+                    # YAML reads an unquoted `on:` as True and `2:` as 2. A
+                    # profile keyed by a non-string cannot be shown in a
+                    # menu or named in a command, and adopting one as the
+                    # active profile left every later session unable to
+                    # open the widget until the file was edited by hand.
+                    raise ValueError(
+                        f"Profile name {name!r} in {filepath} is not text; "
+                        "quote it in the file"
+                    )
                 if not isinstance(config_dict, dict):
                     raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
                 # ``from_file_content`` takes the source as an argument, so

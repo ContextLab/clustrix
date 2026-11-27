@@ -5388,22 +5388,6 @@ profiles:
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PRODUCT GAP, not a test problem. ProfileManager.load_from_file "
-        "accepts a profile whose YAML key is not a string (``on:`` is True, "
-        "``2:`` is an int) and stores it under that key. The widget then "
-        "assigns the bool to a Text control: _on_load_config raises "
-        "TraitError out of the button handler, the store is persisted with "
-        "``active_profile: true``, and every later ModernClustrixWidget() "
-        "raises the same TraitError at construction until the user edits "
-        "~/.clustrix/profiles/profiles.yml by hand. The deleted widget "
-        "closed this with config.config_name_from_document, which nothing "
-        "calls any more. Remove this marker when load_from_file coerces or "
-        "refuses non-string names."
-    ),
-)
 def test_a_bundle_yaml_did_not_key_with_strings_cannot_break_the_widget(tmp_path):
     """A shipped file must not be able to stop the widget from working.
 
