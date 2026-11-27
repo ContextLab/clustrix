@@ -186,6 +186,101 @@ turns a real failure into a pass, which is exactly what this suite exists to
 prevent. Skip on a missing prerequisite you checked for, not on any exception
 that happens to come out.
 
+## On your own clusters
+
+Everything above runs against a cluster built on one machine. This section
+is for the hardware that cluster cannot stand in for: a host with real GPUs,
+a real SLURM cluster, and HuggingFace Jobs. One script does it,
+`scripts/verify_cluster_usecases.py`, from a machine that can reach them
+(your laptop on the VPN, not CI).
+
+**1. Install, on the machine you will run from.**
+
+```bash
+pip install -e ".[dev]"
+```
+
+The Python here and on each cluster must be the same minor version; step 3
+tells you what each cluster has. For the GPU arithmetic case the worker
+needs PyTorch with CUDA: install `torch` here (your environment is mirrored
+onto the worker), or name an existing environment on the cluster with the
+`_ENV` setting.
+
+**2. Say where the clusters are.**
+
+```bash
+cp scripts/cluster_test.env.example ~/.clustrix-test.env
+$EDITOR ~/.clustrix-test.env       # every setting is explained in the file
+set -a; . ~/.clustrix-test.env; set +a
+```
+
+No secret has to go in that file. Use a key file or the ssh-agent, and
+`hf auth login` for HuggingFace. Connect to each host once with plain `ssh`
+so it is in `known_hosts`; host keys are verified.
+
+**3. Look before submitting anything.**
+
+```bash
+python scripts/verify_cluster_usecases.py --check
+```
+
+This connects to each target and prints who you are there, the Python it
+has, the GPUs `nvidia-smi` lists, the SLURM partitions with their gres, and
+which account the HuggingFace token belongs to. It submits nothing and
+costs nothing. Fix what it shows -- a partition name, a module to load, a
+GPU count -- in `~/.clustrix-test.env` and run it again.
+
+**4. Run the cases.**
+
+```bash
+python scripts/verify_cluster_usecases.py gpu-1            # the SSH GPU host
+python scripts/verify_cluster_usecases.py slurm-1          # the SLURM cluster
+python scripts/verify_cluster_usecases.py hf               # HF Jobs, cpu-basic
+python scripts/verify_cluster_usecases.py --case gpu_visible --case gpu_loop gpu-1
+```
+
+The first job on a cluster builds its Python environment and can take
+several minutes; later jobs reuse it. Each case prints the function, what
+came back, and `OK`, `FAIL`, `SKIPPED` (the target cannot run it) or `NOT
+ESTABLISHED` (it ran, and what it found proves nothing either way -- no
+PyTorch on the worker). The cases that need real hardware:
+
+| Case | What a pass shows |
+|-|-|
+| `provenance` | The work ran on another machine. Run first on every target; nothing after it means anything otherwise. |
+| `loop_divided` | A loop became several jobs and the answer is the direct call's. |
+| `input_file` | A file that exists only on this machine was there when the job opened it. |
+| `environment_variables` | `plain_environment_variables` and `environment_variables` both reach the job. |
+| `gpu_visible` | A job that asked for a GPU can see one. |
+| `gpu_computation` | Arithmetic done on the GPU with PyTorch comes back exactly right. |
+| `gpu_loop` | Each piece of a divided loop with `gpus=1` sees exactly one device. |
+
+**5. HuggingFace GPU hardware costs money** and is a separate target that
+runs only when you name the hardware:
+
+```bash
+CLUSTRIX_TEST_HF_GPU_FLAVOR=t4-small python scripts/verify_cluster_usecases.py hf-gpu
+```
+
+A run is a handful of jobs of a minute or two each, with a 20-minute limit
+per job.
+
+**6. Keep the output.** It is the evidence the backend table in `CLAUDE.md`
+rests on:
+
+```bash
+python scripts/verify_cluster_usecases.py 2>&1 | tee docs/evidence/usecase-matrix.txt
+```
+
+Read it before committing: it prints hostnames and usernames (never
+passwords or tokens).
+
+What a run leaves behind: job directories under each target's remote work
+directory are removed on success; the built environments
+(`<remote dir>/envs/`) and the staged input file
+(`<remote dir>/data/`) stay, because nothing staged is deleted
+automatically.
+
 ## Continuous integration
 
 `.github/workflows/real-world-tests.yml` runs this suite. It has no `push:` or

@@ -16,17 +16,27 @@ returns (``None``, large payloads) that have broken serialization before.
 
 Usage::
 
+    python scripts/verify_cluster_usecases.py --check         # connect, look, submit nothing
     python scripts/verify_cluster_usecases.py                 # every target
     python scripts/verify_cluster_usecases.py hf              # one target
     python scripts/verify_cluster_usecases.py --case closure  # one case
 
-Credentials come from ~/.clustrix-dev-credentials or the environment
-(CLUSTRIX_SLURM_PASSWORD, CLUSTRIX_GPU_PASSWORD, HF_TOKEN). Cluster hosts are
-never hardcoded; each target reads its hostname from an environment variable
-(CLUSTRIX_TEST_SLURM_HOST, CLUSTRIX_TEST_SLURM_HOST_2, CLUSTRIX_TEST_SSH_HOST,
-CLUSTRIX_TEST_SSH_HOST_2) and a shared CLUSTRIX_TEST_USERNAME. A target whose
-host variable is unset, or whose host does not resolve (e.g. split-DNS
-internal names that need a VPN), is reported as SKIPPED, never as passing.
+Nothing about a cluster is hardcoded. Each target is described by
+environment variables -- ``scripts/cluster_test.env.example`` lists them all
+with what each is for -- and a target whose host variable is unset, or whose
+host does not resolve (a split-DNS name that needs a VPN), is reported as
+SKIPPED, never as passing. So is a case a target cannot run: a GPU case on
+a target that was not said to have GPUs.
+
+Secrets are never read from the command line. A password comes from
+``CLUSTRIX_SLURM_PASSWORD`` / ``CLUSTRIX_GPU_PASSWORD`` or
+``~/.clustrix-dev-credentials``; a key from ``CLUSTRIX_TEST_<TARGET>_KEY``;
+with neither, the ssh-agent and default keys are tried. The HuggingFace
+token comes from ``HF_TOKEN`` or the hub's own token file. Host keys are
+verified against ``known_hosts`` as always: connect once with ``ssh`` first.
+
+``hf-gpu`` spends money and runs only when ``CLUSTRIX_TEST_HF_GPU_FLAVOR``
+names the hardware to rent.
 """
 
 import argparse
@@ -34,8 +44,10 @@ import inspect
 import json
 import os
 import re
+import secrets
 import socket
 import sys
+import tempfile
 import textwrap
 import traceback
 from dataclasses import asdict
@@ -48,7 +60,7 @@ sys.path.insert(0, str(_ROOT))
 # shape of every real project with more than one file.
 sys.path.insert(0, str(_ROOT / "tests" / "unit" / "localproject"))
 
-from clustrix import cluster, configure  # noqa: E402
+from clustrix import cluster, configure, explain  # noqa: E402
 from clustrix.config import (  # noqa: E402
     ClusterConfig,
     SECRET_FIELDS,
@@ -172,6 +184,32 @@ def source_of(func: Callable) -> str:
 # `decorate` applies @cluster with the right resources; the *undecorated*
 # function is called locally to derive the expected answer, so the comparison
 # is against something this file did not hardcode.
+
+
+class NotApplicable(Exception):
+    """This case cannot be run on this target; the reason is the message."""
+
+
+#: What the target being run is: "ssh", "slurm" or "hf", and how many GPUs
+#: one job may ask it for (0: it was not said to have any).
+TARGET: Dict[str, Any] = {"kind": None, "gpus": 0}
+
+
+def _only_on(*kinds: str) -> None:
+    if TARGET["kind"] not in kinds:
+        raise NotApplicable(
+            f"this case is about {' and '.join(kinds)} targets; "
+            f"this one is {TARGET['kind']}"
+        )
+
+
+def _needs_gpus() -> int:
+    if not TARGET["gpus"]:
+        raise NotApplicable(
+            "this target was not said to have GPUs "
+            "(see cluster_test.env.example for the variable that says so)"
+        )
+    return int(TARGET["gpus"])
 
 
 def case_provenance(decorate):
@@ -426,6 +464,220 @@ def case_raises(decorate):
 
 
 # `provenance` must run first; dict order is insertion order.
+def case_loop_divided(decorate):
+    """A loop at the top of a function becomes one job per piece.
+
+    The totals must be what a direct call returns, in order, and the pieces
+    must have run in more than one process -- otherwise nothing was divided
+    and the first half of this proves nothing new.
+    """
+    _only_on("ssh", "slurm")
+
+    def squares_up_to_each(limits):
+        import os
+        import socket
+
+        totals = []
+        ran_in = []
+        for limit in limits:
+            totals.append(sum(i * i for i in range(limit)))
+            ran_in.append((socket.gethostname(), os.getpid()))
+        return totals, ran_in
+
+    limits = [200_000, 300_000, 400_000, 500_000, 600_000, 700_000]
+    remote = cluster(cores=1, parallel=True)(squares_up_to_each)
+    print(textwrap.indent(explain(remote), "  plan: "))
+
+    def check(actual):
+        totals, ran_in = actual
+        expected, _ = squares_up_to_each(limits)
+        if totals != expected:
+            return False, f"totals differ: expected {_abbrev(expected)}"
+        processes = sorted(set(map(tuple, ran_in)))
+        if len(processes) < 2:
+            return False, f"every iteration ran in one process: {processes}"
+        return True, f"same totals, from {len(processes)} processes: {processes}"
+
+    return remote, squares_up_to_each, (limits,), {}, check
+
+
+def case_input_file(decorate):
+    """A file that exists only on this machine is there when the job opens it.
+
+    The path is an argument, so it is found without being declared. The
+    file is made for this run and its content is random: a copy left on the
+    cluster by an earlier run cannot answer for it.
+    """
+    _only_on("ssh", "slurm")
+    folder = Path(tempfile.mkdtemp(prefix="clustrix-usecase-"))
+    path = folder / "measurements.txt"
+    path.write_text("\n".join(secrets.token_hex(16) for _ in range(200)) + "\n")
+
+    def checksum(path):
+        import hashlib
+
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+
+    return decorate(checksum), checksum, (str(path),), {}
+
+
+def case_environment_variables(decorate):
+    """Both kinds of variable reach the job: the plain list and the mapping."""
+    _only_on("ssh", "slurm")
+    shown, hidden = secrets.token_hex(8), secrets.token_hex(8)
+    configure(
+        plain_environment_variables=[f"CLUSTRIX_USECASE_PLAIN={shown} with a space"],
+        environment_variables={"CLUSTRIX_USECASE_HIDDEN": hidden},
+    )
+
+    def read_variables(names):
+        import os
+
+        return [os.environ.get(name) for name in names]
+
+    def check(actual):
+        expected = [f"{shown} with a space", hidden]
+        if actual == expected:
+            return True, "both values arrived as they were set"
+        return False, f"expected {expected}"
+
+    names = ["CLUSTRIX_USECASE_PLAIN", "CLUSTRIX_USECASE_HIDDEN"]
+    return decorate(read_variables), read_variables, (names,), {}, check
+
+
+def _gpu_decorator(**options):
+    """``@cluster`` asking for one job's GPUs the way this target is asked.
+
+    HuggingFace hardware is the flavor in the configuration, and ``gpus=``
+    is ignored there with a warning, so it is left out.
+    """
+    if TARGET["kind"] != "hf":
+        options["gpus"] = 1
+    return cluster(cores=1, **options)
+
+
+def case_gpu_visible(decorate):
+    """The job asked for a GPU. Does the driver show it one?"""
+    _needs_gpus()
+
+    def devices_seen(_):
+        import os
+        import subprocess
+
+        try:
+            listing = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,name,memory.total",
+                    "--format=csv,noheader",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            found, problem = listing.stdout.strip().splitlines(), listing.stderr[:300]
+        except OSError as error:
+            found, problem = [], str(error)
+        return {
+            "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "nvidia-smi": found,
+            "problem": problem.strip(),
+        }
+
+    def check(actual):
+        if not actual["nvidia-smi"]:
+            return False, f"no GPU listed on the worker: {actual['problem'] or 'empty'}"
+        return True, f"{len(actual['nvidia-smi'])} device(s) listed"
+
+    return _gpu_decorator()(devices_seen), devices_seen, (0,), {}, check
+
+
+def case_gpu_computation(decorate):
+    """Arithmetic done on the GPU comes back right.
+
+    The sum of squares below 100000 is an integer a float64 holds exactly,
+    so the answer is compared with ``==``. The worker needs PyTorch with
+    CUDA: installed here (the local environment is mirrored), or in the
+    environment the target's ``_ENV`` variable names. Without it this is
+    reported as not established, not as a pass.
+    """
+    _needs_gpus()
+
+    def sum_of_squares_on_the_gpu(n):
+        try:
+            import torch
+        except ImportError as error:
+            return {"torch": None, "why": str(error)}
+        if not torch.cuda.is_available():
+            return {"torch": torch.__version__, "cuda": False}
+        values = torch.arange(n, dtype=torch.float64, device="cuda")
+        total = float((values * values).sum().item())
+        return {
+            "torch": torch.__version__,
+            "cuda": True,
+            "device": torch.cuda.get_device_name(0),
+            "total": total,
+            "bytes_on_device": int(torch.cuda.max_memory_allocated()),
+        }
+
+    n = 100_000
+
+    def check(actual):
+        if actual.get("torch") is None:
+            return None, f"PyTorch is not on the worker ({actual.get('why')})"
+        if not actual.get("cuda"):
+            return False, f"torch {actual['torch']} on the worker sees no CUDA device"
+        expected = float((n - 1) * n * (2 * n - 1) // 6)
+        if actual["total"] != expected or actual["bytes_on_device"] <= 0:
+            return False, f"expected total {expected} and memory in use on the device"
+        return True, f"computed on {actual['device']}"
+
+    remote = _gpu_decorator()(sum_of_squares_on_the_gpu)
+    return remote, sum_of_squares_on_the_gpu, (n,), {}, check
+
+
+def case_gpu_loop(decorate):
+    """A divided loop with ``gpus=1``: every piece has a device of its own.
+
+    On an ssh host clustrix hands the devices out itself; under SLURM the
+    scheduler does. Either way an iteration must see exactly one.
+    """
+    _only_on("ssh", "slurm")
+    _needs_gpus()
+
+    def device_for_each(labels):
+        import os
+        import socket
+
+        seen = []
+        for label in labels:
+            seen.append(
+                (
+                    label,
+                    socket.gethostname(),
+                    os.getpid(),
+                    os.environ.get("CUDA_VISIBLE_DEVICES"),
+                )
+            )
+        return seen
+
+    labels = ["a", "b", "c", "d"]
+    remote = cluster(cores=1, gpus=1, parallel=True)(device_for_each)
+    print(textwrap.indent(explain(remote), "  plan: "))
+
+    def check(actual):
+        if [row[0] for row in actual] != labels:
+            return False, "the labels did not come back in order"
+        without = [row for row in actual if not row[3] or "," in row[3]]
+        if without:
+            return False, f"an iteration did not see exactly one device: {without}"
+        pieces = sorted({tuple(row[1:]) for row in actual})
+        return True, f"{len(pieces)} piece(s), as (host, pid, device): {pieces}"
+
+    return remote, device_for_each, (labels,), {}, check
+
+
 CASES = {
     "provenance": case_provenance,
     "arithmetic": case_arithmetic,
@@ -445,110 +697,148 @@ CASES = {
     "keyword_arguments": case_keyword_arguments,
     "nested_data": case_nested_data,
     "raises": case_raises,
+    "loop_divided": case_loop_divided,
+    "input_file": case_input_file,
+    "environment_variables": case_environment_variables,
+    "gpu_visible": case_gpu_visible,
+    "gpu_computation": case_gpu_computation,
+    "gpu_loop": case_gpu_loop,
 }
 
 
 # --------------------------------------------------------------- the targets
 
 
-def _test_username() -> str:
-    username = os.environ.get("CLUSTRIX_TEST_USERNAME")
-    if not username:
-        raise RuntimeError("CLUSTRIX_TEST_USERNAME is not set")
-    return username
+def _variable(target: str, name: str) -> str:
+    """The variable holding one setting of one target.
+
+    ``CLUSTRIX_TEST_SLURM_PARTITION`` for the first SLURM cluster and
+    ``CLUSTRIX_TEST_SLURM_PARTITION_2`` for the second: ``target`` is
+    ``"SLURM"`` or ``"SLURM_2"``, and the number goes last because
+    ``CLUSTRIX_TEST_SLURM_HOST_2`` is the name already in use.
+    """
+    kind, _, number = target.partition("_")
+    return f"CLUSTRIX_TEST_{kind}_{name}" + (f"_{number}" if number else "")
 
 
-def _configure_slurm_host(host_env: str) -> str:
-    host = os.environ.get(host_env)
+def _setting(target: str, name: str, default: Optional[str] = None) -> Optional[str]:
+    return os.environ.get(_variable(target, name)) or default
+
+
+def _configure_remote(
+    target: str, cluster_type: str, password: Optional[str], work_dir: str
+) -> str:
+    """Point clustrix at the host ``CLUSTRIX_TEST_<TARGET>_HOST`` names."""
+    host = _setting(target, "HOST")
     if not host:
-        raise RuntimeError(
-            f"{host_env} is not set; export it to a reachable SLURM host"
-        )
+        raise RuntimeError(f"{_variable(target, 'HOST')} is not set")
     if not resolves(host):
         raise RuntimeError(f"{host} does not resolve (check VPN/network access)")
-    username = _test_username()
-    password = slurm_password()
-    if not password:
-        raise RuntimeError("no SLURM password available")
-    remote_work_dir = os.environ.get(
-        "CLUSTRIX_TEST_SLURM_REMOTE_DIR", "~/clustrix_usecases"
-    )
-    configure(
-        cluster_type="slurm",
+    username = _setting(target, "USER") or os.environ.get("CLUSTRIX_TEST_USERNAME")
+    if not username:
+        raise RuntimeError(
+            f"neither {_variable(target, 'USER')} nor CLUSTRIX_TEST_USERNAME is set"
+        )
+    key = _setting(target, "KEY")
+    if key and not Path(key).expanduser().exists():
+        raise RuntimeError(
+            f"{_variable(target, 'KEY')} names {key}, which is not there"
+        )
+    if not key and target == "SSH":
+        # Where `clustrix ssh-setup --alias test_gpu` leaves the key it made.
+        made = Path.home() / ".ssh" / f"id_ed25519_clustrix_{username}_test_gpu"
+        key = str(made) if made.exists() else None
+    settings: Dict[str, Any] = dict(
+        cluster_type=cluster_type,
         cluster_host=host,
+        cluster_port=int(_setting(target, "PORT", "22")),
         username=username,
-        password=password,
-        remote_work_dir=remote_work_dir,
+        # A key when one is named; else a password when one is stored; else
+        # neither, and paramiko tries the ssh-agent and the default keys.
+        key_file=str(Path(key).expanduser()) if key else None,
+        password=None if key else password,
+        remote_work_dir=_setting(target, "REMOTE_DIR", work_dir),
         job_poll_interval=5,
         venv_setup_timeout=1800,
+        # The older cases are about one job each; the loop cases ask for
+        # division themselves with parallel=True.
         auto_parallel=False,
-        auto_gpu_parallel=False,
         default_cores=1,
         default_memory="4GB",
         default_time="00:15:00",
+        module_loads=(_setting(target, "MODULES") or "").split(),
     )
+    if _setting(target, "PARTITION"):
+        settings["default_partition"] = _setting(target, "PARTITION")
+    if _setting(target, "ENV"):
+        settings["conda_env_name"] = _setting(target, "ENV")
+    configure(**settings)
+    return host
+
+
+def _configure_slurm(target: str) -> str:
+    host = _configure_remote(target, "slurm", slurm_password(), "~/clustrix_usecases")
+    # A scheduler is only asked for a GPU when told it has one: an sbatch
+    # that names a gres the cluster lacks is refused, and that refusal
+    # would say nothing about clustrix.
+    TARGET.update(kind="slurm", gpus=int(_setting(target, "GPUS", "0")))
+    return host
+
+
+def _configure_ssh(target: str) -> str:
+    host = _configure_remote(target, "ssh", gpu_password(), "~/.clustrix/usecases")
+    TARGET.update(kind="ssh", gpus=int(_setting(target, "GPUS", "1")))
     return host
 
 
 def configure_slurm_primary() -> str:
-    return _configure_slurm_host("CLUSTRIX_TEST_SLURM_HOST")
+    return _configure_slurm("SLURM")
 
 
 def configure_slurm_secondary() -> str:
-    return _configure_slurm_host("CLUSTRIX_TEST_SLURM_HOST_2")
-
-
-def _configure_ssh_host(host_env: str, *, allow_key: bool) -> str:
-    host = os.environ.get(host_env)
-    if not host:
-        raise RuntimeError(
-            f"{host_env} is not set; export it to a reachable SSH+GPU host"
-        )
-    if not resolves(host):
-        raise RuntimeError(f"{host} does not resolve (check VPN/network access)")
-    username = _test_username()
-    key = Path.home() / ".ssh" / f"id_ed25519_clustrix_{username}_test_gpu"
-    password = gpu_password()
-    use_key = allow_key and key.exists()
-    if not use_key and not password:
-        raise RuntimeError(f"no credentials for {host}")
-    configure(
-        cluster_type="ssh",
-        cluster_host=host,
-        username=username,
-        key_file=str(key) if use_key else None,
-        password=None if use_key else password,
-        remote_work_dir="~/.clustrix/usecases",
-        job_poll_interval=5,
-        venv_setup_timeout=1800,
-        auto_parallel=False,
-        auto_gpu_parallel=False,
-    )
-    return host
+    return _configure_slurm("SLURM_2")
 
 
 def configure_gpu_primary() -> str:
-    return _configure_ssh_host("CLUSTRIX_TEST_SSH_HOST", allow_key=True)
+    return _configure_ssh("SSH")
 
 
 def configure_gpu_secondary() -> str:
-    return _configure_ssh_host("CLUSTRIX_TEST_SSH_HOST_2", allow_key=False)
+    return _configure_ssh("SSH_2")
 
 
-def configure_hf() -> str:
+def _configure_hf(flavor: str) -> str:
     token = hf_token()
     if not token:
-        raise RuntimeError("no HuggingFace token available")
+        raise RuntimeError("no HuggingFace token available (HF_TOKEN)")
+    namespace = os.environ.get("CLUSTRIX_HF_NAMESPACE")
     configure(
         cluster_type="huggingface",
         hf_token=token,
-        hf_namespace=os.environ.get("CLUSTRIX_HF_NAMESPACE", "contextlab"),
-        hf_flavor="cpu-basic",
+        hf_namespace=namespace,
+        hf_flavor=flavor,
         hf_job_timeout="20m",
         auto_parallel=False,
-        auto_gpu_parallel=False,
     )
-    return "huggingface-jobs (contextlab)"
+    return f"huggingface-jobs ({namespace or 'the token owner'}, {flavor})"
+
+
+def configure_hf() -> str:
+    where = _configure_hf("cpu-basic")
+    TARGET.update(kind="hf", gpus=0)
+    return where
+
+
+def configure_hf_gpu() -> str:
+    flavor = os.environ.get("CLUSTRIX_TEST_HF_GPU_FLAVOR")
+    if not flavor:
+        raise RuntimeError(
+            "CLUSTRIX_TEST_HF_GPU_FLAVOR is not set; this target rents GPU "
+            "hardware and runs only when told which (e.g. t4-small)"
+        )
+    where = _configure_hf(flavor)
+    TARGET.update(kind="hf", gpus=1)
+    return where
 
 
 TARGETS = {
@@ -556,8 +846,76 @@ TARGETS = {
     "slurm-2": ("SLURM · $CLUSTRIX_TEST_SLURM_HOST_2", configure_slurm_secondary),
     "gpu-1": ("SSH+GPU · $CLUSTRIX_TEST_SSH_HOST", configure_gpu_primary),
     "gpu-2": ("SSH+GPU · $CLUSTRIX_TEST_SSH_HOST_2", configure_gpu_secondary),
-    "hf": ("HuggingFace Jobs · container", configure_hf),
+    "hf": ("HuggingFace Jobs · cpu-basic", configure_hf),
+    "hf-gpu": ("HuggingFace Jobs · $CLUSTRIX_TEST_HF_GPU_FLAVOR", configure_hf_gpu),
 }
+
+
+# -------------------------------------------------------------------- looking
+#
+# ``--check``: connect to each target and report what is there, submitting
+# nothing and spending nothing. Run it first: a wrong partition name or a
+# missing module costs a minute here and an afternoon in the job logs.
+
+_LOOK = {
+    "who and where": 'echo "$(whoami)@$(hostname)"',
+    "python3": "python3 --version 2>&1 || echo 'no python3 on PATH'",
+    "GPUs": (
+        "nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader "
+        "2>/dev/null || echo 'nvidia-smi: not available here'"
+    ),
+}
+_LOOK_SLURM = {
+    "partitions (name, state, time limit, nodes, gres)": (
+        "sinfo -o '%P %a %l %D %G' 2>&1 || echo 'sinfo: not available here'"
+    ),
+}
+
+
+def check_target(key: str) -> Dict[str, Any]:
+    label, setup = TARGETS[key]
+    print("\n" + "=" * 78)
+    print(f"CHECK: {label}")
+    print("=" * 78)
+    configure(**asdict(ClusterConfig()))
+    try:
+        where = setup()
+    except Exception as e:  # noqa: BLE001
+        print(f"SKIPPED: {e}")
+        return {"target": key, "status": "skipped", "reason": str(e)}
+    print(textwrap.indent(redacted_config(), "  "))
+
+    try:
+        if TARGET["kind"] == "hf":
+            from huggingface_hub import whoami
+
+            me = whoami(token=get_config().hf_token)
+            orgs = ", ".join(org["name"] for org in me.get("orgs", [])) or "none"
+            print(f"  token belongs to {me['name']}; organisations: {orgs}")
+            print(f"  jobs would run as {where}; nothing was submitted")
+        else:
+            from clustrix.executor import ClusterExecutor
+
+            with ClusterExecutor(get_config()) as executor:
+                executor.connect()
+                looks = dict(_LOOK)
+                if TARGET["kind"] == "slurm":
+                    looks.update(_LOOK_SLURM)
+                for what, command in looks.items():
+                    out, _ = executor.connection_manager.execute_remote_command(command)
+                    print(f"  {what}:")
+                    print(textwrap.indent(out.strip() or "(nothing)", "      "))
+            here = "%d.%d" % sys.version_info[:2]
+            print(
+                f"  this machine runs Python {here}; the worker must have the "
+                "same minor version (clustrix looks for one, and module_loads "
+                f"via CLUSTRIX_TEST_*_MODULES can supply it)"
+            )
+    except Exception as e:  # noqa: BLE001
+        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:300]}")
+        return {"target": key, "status": "failed", "passed": 0, "total": 1}
+    print("  OK — reachable")
+    return {"target": key, "status": "passed", "passed": 1, "total": 1}
 
 
 # ------------------------------------------------------------------- running
@@ -617,9 +975,15 @@ def _run_raises(remote_callable, plain, args, kwargs) -> Dict[str, Any]:
 
 
 def run_case(name: str, builder, decorate) -> Dict[str, Any]:
-    remote_callable, plain, args, kwargs = builder(decorate)
-
     print(f"\n--- case: {name} " + "-" * max(0, 58 - len(name)))
+    try:
+        built = builder(decorate)
+    except NotApplicable as why:
+        print(f"  SKIPPED — {why}")
+        return {"case": name, "ok": None, "detail": str(why)}
+    remote_callable, plain, args, kwargs = built[:4]
+    check = built[4] if len(built) > 4 else None
+
     print(source_of(plain))
     print(f"\ncall: {_format_call(plain.__name__, args, kwargs)}")
 
@@ -628,16 +992,24 @@ def run_case(name: str, builder, decorate) -> Dict[str, Any]:
     if name == "raises":
         return _run_raises(remote_callable, plain, args, kwargs)
 
-    expected = plain(*args, **kwargs)
     try:
         actual = remote_callable(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
-        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:160]}")
+        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:300]}")
         return {"case": name, "ok": False, "detail": type(e).__name__}
 
+    print(f"  actual  : {_abbrev(actual, 400)}")
+    if check is not None:
+        # The answer is not what a call on this machine returns -- a process
+        # id, a device name -- so the case says what a right answer is.
+        ok, note = check(actual)
+        verdict = {True: "OK", False: "FAIL", None: "NOT ESTABLISHED"}[ok]
+        print(f"  {verdict} — {note}")
+        return {"case": name, "ok": ok, "detail": note}
+
+    expected = plain(*args, **kwargs)
     ok = actual == expected
     print(f"  expected: {_abbrev(expected)}")
-    print(f"  actual  : {_abbrev(actual)}")
     if ok:
         print("  OK — values match")
     else:
@@ -716,12 +1088,20 @@ def run_target(key: str, case_names: List[str]) -> Dict[str, Any]:
             }
 
     passed = sum(1 for r in results if r["ok"])
-    print(f"\n{label}: {passed}/{len(results)} cases returned the correct answer")
+    ran = [r for r in results if r["ok"] is not None]
+    left_out = len(results) - len(ran)
+    print(
+        f"\n{label}: {passed}/{len(ran)} cases returned the correct answer"
+        + (f"; {left_out} not run or not established" if left_out else "")
+    )
     return {
         "target": key,
-        "status": "passed" if results and passed == len(results) else "failed",
+        "status": "passed" if ran and passed == len(ran) else "failed",
         "passed": passed,
-        "total": len(results),
+        "total": len(ran),
+        "left_out": [
+            f"{r['case']}: {r.get('detail')}" for r in results if r["ok"] is None
+        ],
         "results": results,
     }
 
@@ -731,6 +1111,11 @@ def main() -> int:
     parser.add_argument("targets", nargs="*", choices=list(TARGETS), default=None)
     parser.add_argument(
         "--case", action="append", dest="cases", help="run only these (repeatable)"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="connect to each target and report what is there; submit nothing",
     )
     parser.add_argument(
         "--allow-skip",
@@ -753,7 +1138,10 @@ def main() -> int:
     print(f"caller: {socket.gethostname()} · python {sys.version.split()[0]}")
     print(f"cases : {', '.join(cases)}")
 
-    summaries = [run_target(t, cases) for t in targets]
+    if args.check:
+        summaries = [check_target(t) for t in targets]
+    else:
+        summaries = [run_target(t, cases) for t in targets]
 
     print("\n" + "=" * 78)
     print("SUMMARY")
@@ -766,6 +1154,8 @@ def main() -> int:
                 f"{s['target']:16s} {s['status'].upper():8s} "
                 f"{s['passed']}/{s['total']} correct"
             )
+            for line in s.get("left_out", []):
+                print(f"{'':16s} not run  {line}")
 
     failed = [s for s in summaries if s["status"] == "failed"]
     skipped = [s for s in summaries if s["status"] == "skipped"]

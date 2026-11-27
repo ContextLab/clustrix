@@ -114,6 +114,19 @@ was not is marked.
 
 ### Added
 
+- `scripts/verify_cluster_usecases.py` tests your own hardware from one
+  command. `--check` connects to each target and reports what is there
+  (Python, GPUs, partitions, the HuggingFace account) without submitting
+  anything. New cases cover a divided loop, an automatically staged input
+  file, both kinds of environment variable, and three GPU checks: a device
+  is visible, arithmetic on it is right, and each piece of a divided loop
+  sees exactly one. Targets are described by the variables in
+  `scripts/cluster_test.env.example` (port, key, partition, GPUs, modules,
+  environment); `hf-gpu` runs only when the hardware to rent is named. The
+  guide is "On your own clusters" in `docs/REAL_WORLD_TESTING.md`. The new
+  cases were run against the local sshd and SLURM, which have no real GPU;
+  **they have not yet been run on GPU hardware or on HuggingFace.**
+
 - **`plain_environment_variables`**: `NAME=value` lines for variables that
   are not secret (`["OMP_NUM_THREADS=4"]`). Saved in configuration files
   and profiles and shown as typed, where `environment_variables` is
