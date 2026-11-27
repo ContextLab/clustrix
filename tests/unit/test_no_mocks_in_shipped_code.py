@@ -720,11 +720,12 @@ def test_the_guard_is_blind_to_these_and_says_so(name):
 
 #: Things that look like violations to a grep, or to the previous version
 #: of this guard, and are not. The first four are drawn from code that
-#: really is in ``clustrix/``; the rest are plausible code that the
+#: is, or was, in ``clustrix/``; the rest are plausible code that the
 #: previous guard would have flagged, each of which would have earned an
 #: allowlist entry and killed it.
 INNOCENT = {
-    # clustrix/notebook_magic.py:83 -- a comment, not a mock.
+    # A comment, not a mock. (This one was clustrix/notebook_magic.py:83
+    # until the re-export list it annotated was deleted.)
     "comment_mentions_mocks": (
         "def render(widgets):\n"
         "    # IPython components (may be mocks)\n"

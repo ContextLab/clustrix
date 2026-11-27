@@ -908,7 +908,7 @@ def test_the_store_records_where_the_hostname_came_from_not_where_the_object_did
 
 def test_an_untrusted_recorded_source_is_believed_over_the_location():
     """The whole point: Save moves the file, the record moves with it."""
-    from clustrix.notebook_magic_config import config_source_for_saved_entry
+    from clustrix.config import config_source_for_saved_entry
 
     assert (
         config_source_for_saved_entry(
@@ -924,7 +924,7 @@ def test_an_untrusted_recorded_source_is_believed_over_the_location():
 )
 def test_a_recorded_trusted_source_cannot_promote_the_file_it_sits_in(recorded):
     """Downgrade only. A file that could raise its own trust *is* the route."""
-    from clustrix.notebook_magic_config import config_source_for_saved_entry
+    from clustrix.config import config_source_for_saved_entry
 
     assert (
         config_source_for_saved_entry(CONFIG_SOURCE_WORKING_DIRECTORY, recorded)
@@ -935,7 +935,7 @@ def test_a_recorded_trusted_source_cannot_promote_the_file_it_sits_in(recorded):
 @pytest.mark.parametrize("recorded", ["invented", 17, ["working-directory"], {}])
 def test_an_unrecognised_record_is_read_as_a_redirect(recorded):
     """Refusing to load costs every configuration; refusing to trust costs one."""
-    from clustrix.notebook_magic_config import config_source_for_saved_entry
+    from clustrix.config import config_source_for_saved_entry
 
     assert (
         config_source_for_saved_entry(CONFIG_SOURCE_USER_CONFIG_DIR, recorded)
@@ -959,7 +959,7 @@ def test_a_file_that_records_nothing_is_left_exactly_as_it_was_found(file_source
     hand -- the documented remedy -- would stop working, and there would be
     no way to adopt a project's configuration at all.
     """
-    from clustrix.notebook_magic_config import config_source_for_saved_entry
+    from clustrix.config import config_source_for_saved_entry
 
     assert config_source_for_saved_entry(file_source, None) == file_source
 
@@ -971,7 +971,7 @@ def test_a_record_that_is_not_a_mapping_condemns_every_entry_in_the_file():
     per entry it would erase the record for every configuration in the file,
     which is a promotion written as a typo.
     """
-    from clustrix.notebook_magic_config import (
+    from clustrix.config import (
         config_source_for_saved_entry,
         recorded_config_source,
     )
