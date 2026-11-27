@@ -24,6 +24,7 @@ from .utils import (
     resolve_named_environment,
     setup_remote_environment,
 )
+from .auto_stage import link_into_job_directory
 from .executor_scheduler_status import SchedulerStatusManager
 
 logger = logging.getLogger(__name__)
@@ -280,6 +281,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via SLURM."""
         remote_job_dir, result_key = self._stage_job_directory(func_data)
+        # Input files found for this call (clustrix.auto_stage) are linked
+        # in at the relative paths the code names them by.
+        link_into_job_directory(
+            self.connection_manager, remote_job_dir, job_config.get("data_links", ())
+        )
         updated_config = self._setup_job_environment(
             remote_job_dir,
             func_data,
@@ -329,6 +335,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via direct SSH using two-venv approach."""
         remote_job_dir, result_key = self._stage_job_directory(func_data)
+        # Input files found for this call (clustrix.auto_stage) are linked
+        # in at the relative paths the code names them by.
+        link_into_job_directory(
+            self.connection_manager, remote_job_dir, job_config.get("data_links", ())
+        )
         updated_config = self._setup_job_environment(
             remote_job_dir,
             func_data,
