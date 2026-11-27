@@ -47,48 +47,83 @@ one of three kinds, and refuses the loop if a name fits none of them:
 
 Anything else -- a value carried from one iteration to the next, ``break``,
 ``return`` inside the loop, a name read after the loop that the loop
-assigned, a write to a global -- is a *blocker*, reported with its line and
-reason by :meth:`ParallelPlan.explain`, and the function runs unsplit.
+assigned, a change to something the function did not create, any direct use
+of the process-wide random generators -- is a *blocker*, reported with its
+line and reason by :meth:`ParallelPlan.explain`, and the function runs
+unsplit.
+
+Split, the three pieces are three functions, and the loop runs in other
+processes. Some functions only mean what they do as one piece, and are not
+analysed at all: one that declares a name ``global`` or ``nonlocal``, one
+wrapped by another decorator (the wrapper's code would be skipped), one
+whose compiled code is not what its source compiles to on its own (the file
+was edited after import; it uses ``super()`` or a class-private name). A
+function defined before the loop that reads a variable assigned in or after
+the loop is a blocker for the same reason: it would go on seeing the value
+from before.
 
 What cannot be proved from source
 ---------------------------------
 
 Static analysis of Python can show that a loop is unsafe to split; it can
 never show that one is safe, because it cannot see what a called function
-does. So the static rule is only the first gate. Three checks that need real
-values run behind it:
+does. So the static rule is only the first gate. These checks, which need
+real values, run behind it:
 
-* **Aliasing.** After ``pre``, the values the body reads are searched for a
-  reference to any object the loop collects into. ``seen = out`` followed by
-  ``out.append(f(seen, x))`` passes the static rule and is caught here,
-  before a single chunk is sent anywhere.
+* **Aliasing.** After ``pre``, everything the body reads -- the values, the
+  items, and the iterable itself before it is listed -- is searched for any
+  object reachable from what the loop collects into. ``seen = out`` followed
+  by ``out.append(f(seen, x))`` passes the static rule and is caught here,
+  before a single chunk is sent anywhere. The search goes through
+  containers, attributes, closures, classes and object arrays; if there is
+  more to search than it will visit, that counts as found.
 * **Mutation.** The body fingerprints every value it reads, and the items it
   was given, before and after its chunk. A difference means an iteration
   changed something its neighbours share.
 * **Hidden randomness.** The state of the process-wide generators of
   ``random`` and NumPy is compared around each chunk, which catches a helper
-  that draws from them. (Using them directly in the body is refused
-  statically, unless the body seeds them first.)
+  that draws from them.
+* **Identity.** The log does not copy an object that existed before the
+  loop: it names it by where it lives (a variable or item, then indexes and
+  attributes), and ``post`` puts the original back. So ``out.append(row)``
+  collects ``row`` itself, and what the code after the loop does to ``row``
+  shows in ``out`` as it would have. A function created in the loop body
+  that closes over the loop's variables and is kept is refused here too:
+  all such functions share one variable in a sequential run.
 
 When a check fails the split is abandoned and the original loop runs once,
 in order, on the environment ``pre`` already produced -- ``pre`` itself is
-never run twice -- so the answer is the sequential one either way.
+never run twice -- so the answer is the sequential one either way. If an
+iteration raises and the caller could see what the loop had collected by
+then (it collects into an argument), the loop is likewise run in order
+where the caller's objects are, so they are left as a direct call would
+have left them.
 
 What no check can see: state that lives outside the values the loop was
 handed. A callee that updates a module-level cache, a library's internal
-counter, a file, a database or a GPU's random state passes all of the above.
-Side effects of that kind still happen once per iteration, but in an
-unspecified order across chunks. That is the residual assumption of
-splitting a loop, and it is the user's to accept.
+counter, a file, a database or a GPU's random state passes all of the above;
+so does process-wide configuration set before the loop (the ``decimal``
+context, the working directory, an environment variable changed in the
+function), which a worker process does not have; so does an object whose
+pickle leaves its state out, since pickling is how a change is noticed.
+Identity is kept for objects found through lists, tuples, dict values and
+attributes, not for the elements of a set or the keys of a dict. Side
+effects of that kind still happen once per iteration, but in an unspecified
+order across chunks. That is the residual assumption of splitting a loop,
+and it is the user's to accept.
 
 The generated functions reference nothing from clustrix, so a worker that
 does not have clustrix installed can run them.
 """
 
+import __future__
 import ast
 import builtins
 import copy
+import dis
+import functools
 import inspect
+import logging
 import re
 import textwrap
 import time
@@ -125,7 +160,6 @@ _RNG_CONSTRUCTORS = frozenset(
         "BitGenerator",
     }
 )
-_RNG_SEEDERS = frozenset({"seed"})
 
 #: Builtins that build an iterable from their arguments without doing work
 #: that belongs on the cluster. Used to decide whether ``pre`` may run where
@@ -160,9 +194,30 @@ _CHEAP_METHODS = frozenset({"items", "keys", "values"})
 _ITEMS = "the items being looped over"
 _RNG = "the global random number generator"
 
-#: Mutable builtin containers. A *global* of one of these types that the loop
-#: writes to is a blocker: the write would land in a worker and be lost.
-_MUTABLE_CONTAINERS = (list, dict, set, bytearray)
+#: What a name the function does not define may be when the loop calls a
+#: method on it or assigns through it: code. ``np.save(...)`` and
+#: ``logger.info(...)`` are calls *into* something. Anything else is data
+#: the function did not create, and a worker's change to it would be lost.
+_CODE_TYPES = (
+    types.ModuleType,
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    type,
+    logging.Logger,
+    logging.LoggerAdapter,
+)
+
+#: How many objects a run-time search will visit before it gives up and the
+#: loop runs in order.
+_WALK_LIMIT = 5_000_000
+
+
+class CannotShip(Exception):
+    """A value the split needs cannot be copied to another process.
+
+    Raised by a ``map_chunks`` backend; :func:`run` then runs the loop in
+    order where the values are.
+    """
 
 
 @dataclass(frozen=True)
@@ -205,6 +260,10 @@ class ParallelPlan:
     post_is_cheap: bool = False
     body_names: Tuple[str, ...] = ()
     post_names: Tuple[str, ...] = ()
+    #: Names from outside the function that the loop calls methods on, which
+    #: were code when the plan was made. Checked again on every run: the
+    #: plan may be reused for another closure of the same source.
+    assumed_code: Tuple[str, ...] = ()
 
     @property
     def parallelizable(self) -> bool:
@@ -499,6 +558,10 @@ class _ReadBeforeAssigned:
         if isinstance(node, ast.Delete):
             for target in node.targets:
                 self._read(target, assigned)
+                # Deleting a name needs it to be bound, as reading it does.
+                if isinstance(target, ast.Name) and target.id in self.tracked:
+                    if target.id not in assigned:
+                        self.violations.setdefault(target.id, node.lineno)
             return assigned - _stored(node.targets)
         if isinstance(node, ast.Match):
             self._read(node.subject, assigned)
@@ -701,29 +764,109 @@ def _global_rng_calls(body: Sequence[ast.stmt]) -> List[Tuple[int, int, str, str
     return sorted(calls)
 
 
-def _body_seeds_global_rng(body: Sequence[ast.stmt]) -> bool:
-    """True when the first thing the body does with such a generator is seed it.
+def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
+    """Any direct use of a process-wide random generator, seeding included.
 
-    What follows a seed is determined by the iteration alone.
+    Seeding at the top of each iteration does make the draws that follow
+    depend on the iteration alone, but the generator is still one object
+    shared by the whole process: what it holds after the loop -- which the
+    code after the loop, and the caller, can draw from -- is the state the
+    *last* iteration left, and a split leaves it untouched instead.
     """
     calls = _global_rng_calls(body)
-    return bool(calls) and calls[0][3] in _RNG_SEEDERS
-
-
-def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
-    """Uses of a process-wide random generator that the body did not seed."""
-    calls = _global_rng_calls(body)
-    if not calls or _body_seeds_global_rng(body):
+    if not calls:
         return []
     line, _, name, _ = calls[0]
     return [
         Blocker(
             line,
-            f"{name}() draws from a random generator shared by all iterations, "
-            "so each draw depends on the ones before it; create one per "
-            "iteration instead, e.g. rng = np.random.default_rng(seed + i)",
+            f"{name}() uses a random generator shared by the whole process, "
+            "so what it returns and what it leaves behind depend on the order "
+            "of the iterations; create one per iteration instead, e.g. "
+            "rng = np.random.default_rng(seed + i)",
         )
     ]
+
+
+def _parameter_names(arguments: ast.arguments) -> List[str]:
+    return [
+        argument.arg
+        for argument in [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *([arguments.vararg] if arguments.vararg else []),
+            *arguments.kwonlyargs,
+            *([arguments.kwarg] if arguments.kwarg else []),
+        ]
+    ]
+
+
+def _free_reads(scope: ast.AST) -> Set[str]:
+    """Names a nested function, lambda or class reads from the scope around it.
+
+    Those are the variables it *closes over*: it sees their current value
+    whenever it is called, not the value they had when it was defined.
+    """
+    own: Set[str] = set()
+    if isinstance(scope, ast.Lambda):
+        own.update(_parameter_names(scope.args))
+        roots: List[ast.AST] = [scope.body]
+    elif isinstance(scope, ast.ClassDef):
+        # A class body's own names do not hide anything from its methods.
+        roots = list(scope.body)
+    else:
+        assert isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
+        own.update(_parameter_names(scope.args))
+        own.update(_stored(scope.body))
+        roots = list(scope.body)
+    reads: Set[str] = set()
+    stack = roots
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _NESTED_SCOPES):
+            reads |= _free_reads(node)
+            continue
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                reads.add(node.id)
+            elif not isinstance(scope, ast.ClassDef):
+                own.add(node.id)  # a comprehension's variable
+        stack.extend(ast.iter_child_nodes(node))
+    return reads - own
+
+
+def _nested_scopes(nodes: Sequence[ast.AST]) -> List[ast.AST]:
+    """The outermost functions, lambdas and classes defined under ``nodes``."""
+    found: List[ast.AST] = []
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _NESTED_SCOPES):
+            found.append(node)
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _resolve(func: Callable, identifier: str) -> Tuple[bool, Any]:
+    """What a free name in ``func`` refers to right now, if anything."""
+    code = func.__code__
+    if func.__closure__ and identifier in code.co_freevars:
+        cell = func.__closure__[code.co_freevars.index(identifier)]
+        try:
+            return True, cell.cell_contents
+        except ValueError:
+            return False, None
+    if identifier in func.__globals__:
+        return True, func.__globals__[identifier]
+    if hasattr(builtins, identifier):
+        return True, getattr(builtins, identifier)
+    return False, None
+
+
+def _is_code(func: Callable, identifier: str) -> bool:
+    found, value = _resolve(func, identifier)
+    return found and isinstance(value, _CODE_TYPES)
 
 
 def _as_written(text: str) -> str:
@@ -738,9 +881,8 @@ def _analyse_loop(
     before: Sequence[ast.stmt],
     after: Sequence[ast.stmt],
     parameters: Set[str],
-    declared_outer: Set[str],
-    resolve: Callable[[str], Tuple[bool, Any]],
-) -> Tuple[LoopAnalysis, List[_Site]]:
+    is_code: Callable[[str], bool],
+) -> Tuple[LoopAnalysis, List[_Site], Set[str]]:
     header = _as_written(f"for {ast.unparse(loop.target)} in {ast.unparse(loop.iter)}")
     analysis = LoopAnalysis(line=loop.lineno, header=header)
     block = analysis.blockers
@@ -748,15 +890,20 @@ def _analyse_loop(
 
     if loop.orelse:
         block.append(Blocker(loop.orelse[0].lineno, "the loop has an else clause"))
+    if not _is_plain_target(loop.target):
+        block.append(
+            Blocker(
+                loop.lineno,
+                f"the loop assigns each item to {ast.unparse(loop.target)}, which "
+                "is not a plain variable, so every iteration writes to the "
+                "same place",
+            )
+        )
 
     # -- statements that end or escape the loop ------------------------------
     for stmt in _statements(body):
         if isinstance(stmt, ast.Return):
             block.append(Blocker(stmt.lineno, "the loop body returns"))
-        elif isinstance(stmt, (ast.Global, ast.Nonlocal)):
-            block.append(
-                Blocker(stmt.lineno, "the loop body declares global/nonlocal names")
-            )
     for stmt in body:
         for node in _in_scope(stmt):
             if isinstance(node, (ast.Yield, ast.YieldFrom, ast.Await)):
@@ -801,10 +948,20 @@ def _analyse_loop(
     used_after = set(liveness.violations)
     read_in_header = _loaded([loop.iter])
 
-    for name in sorted(assigned_in_body & declared_outer):
-        block.append(
-            Blocker(loop.lineno, f"{name} is a global or nonlocal the loop assigns")
-        )
+    # A function defined before the loop keeps reading the variables of the
+    # scope it was defined in. Split, the loop and the code after it run in
+    # scopes of their own, so anything they assign would be invisible to it.
+    assigned_later = assigned_in_body | _stored(after)
+    for scope in _nested_scopes(before):
+        for name in sorted(_free_reads(scope) & assigned_later):
+            block.append(
+                Blocker(
+                    getattr(scope, "lineno", loop.lineno),
+                    f"a function defined before the loop reads {name}, which "
+                    "is assigned again in or after the loop; it would go on "
+                    "seeing the old value",
+                )
+            )
 
     # A module imported, or a function or class defined, before the loop is
     # code rather than data: `np.save(...)` is a call into numpy, not a write
@@ -840,6 +997,7 @@ def _analyse_loop(
         candidates.setdefault(site.root, []).append(site)
         mutated.setdefault(site.root, stmt.lineno)
 
+    assumed_code: Set[str] = set()
     accumulators: Set[str] = set()
     for name, name_sites in candidates.items():
         if name not in defined_before or name in target_names:
@@ -873,14 +1031,15 @@ def _analyse_loop(
                 )
             )
         elif name not in assigned_in_body:
-            found, value = resolve(name)
-            if found and isinstance(value, _MUTABLE_CONTAINERS):
+            if is_code(name):
+                assumed_code.add(name)
+            else:
                 block.append(
                     Blocker(
                         line,
-                        f"{name} is a global the loop writes to; a worker's copy "
-                        "would be lost. Create it inside the function and "
-                        "return it",
+                        f"{name} is not created in this function and the loop "
+                        "changes it; a change made in a worker would be lost. "
+                        "Create it inside the function and return it",
                     )
                 )
 
@@ -910,7 +1069,7 @@ def _analyse_loop(
     analysis.read_only = sorted(
         (read_in_body & defined_before) - assigned_in_body - accumulators
     )
-    return analysis, sites
+    return analysis, sites, assumed_code
 
 
 # --------------------------------------------------------------------------
@@ -1030,37 +1189,32 @@ def {_P}rng_state():
     return digest.hexdigest()
 
 
-def {_P}aliases({_P}env, {_P}written, {_P}read):
+def {_P}reach({_P}roots, {_P}through_code, {_P}seen):
+    # Every object reachable from the roots, once. Numbers, strings and
+    # modules are neither yielded nor entered. Raises OverflowError rather
+    # than stop silently: an unfinished search has proved nothing.
     import gc
+    import sys
     import types
-    immutable = (int, float, complex, str, bytes, bool, type(None), tuple,
-                 frozenset, range)
-    opaque = (types.ModuleType, type, str, bytes, int, float, complex, bool,
-              type(None))
-    targets = {{
-        id({_P}env[name]): name
-        for name in {_P}written
-        if name in {_P}env and not isinstance({_P}env[name], immutable)
-    }}
-    found = set()
-    if not targets:
-        return []
-    for name in {_P}read:
-        if name not in {_P}env:
+    atomic = (int, float, complex, str, bytes, bool, type(None), range,
+              types.ModuleType)
+    numpy = sys.modules.get("numpy")
+    stack = list({_P}roots)
+    while stack:
+        obj = stack.pop()
+        if type(obj) in atomic or id(obj) in {_P}seen:
             continue
-        seen = set()
-        stack = [{_P}env[name]]
-        while stack and len(seen) < 200000:
-            obj = stack.pop()
-            if id(obj) in seen:
-                continue
-            seen.add(id(obj))
-            if id(obj) in targets:
-                found.add((name, targets[id(obj)]))
-                continue
-            if isinstance(obj, opaque):
-                continue
-            if isinstance(obj, types.FunctionType):
+        {_P}seen.add(id(obj))
+        if len({_P}seen) > {_WALK_LIMIT}:
+            raise OverflowError
+        yield obj
+        if isinstance(obj, type):
+            # A class written in Python: its attributes are values too.
+            if {_P}through_code and obj.__flags__ & 512:
+                stack.extend(vars(obj).values())
+                stack.extend(obj.__bases__)
+        elif isinstance(obj, types.FunctionType):
+            if {_P}through_code:
                 # Not its globals: that is the whole module.
                 for cell in obj.__closure__ or ():
                     try:
@@ -1069,12 +1223,180 @@ def {_P}aliases({_P}env, {_P}written, {_P}read):
                         pass
                 stack.extend(obj.__defaults__ or ())
                 stack.extend((obj.__kwdefaults__ or {{}}).values())
-                continue
+        elif isinstance(obj, (types.MethodType, types.BuiltinFunctionType,
+                              types.MethodWrapperType)):
+            # ``out.__len__`` holds ``out``.
+            stack.append(obj.__self__)
             if isinstance(obj, types.MethodType):
-                stack.extend((obj.__self__, obj.__func__))
-                continue
+                stack.append(obj.__func__)
+        elif numpy is not None and isinstance(obj, numpy.ndarray):
+            # The garbage collector does not look inside an array.
+            if obj.dtype.hasobject:
+                stack.extend(obj.flat)
+            if obj.base is not None:
+                stack.append(obj.base)
+        else:
             stack.extend(gc.get_referents(obj))
-    return sorted(found)
+
+
+def {_P}aliases({_P}env, {_P}written, {_P}read, {_P}items=None):
+    # Pairs (what the body reads, what the loop collects into) where the
+    # first can reach an object the second can also reach. The body does not
+    # perform its writes, so anything it could read them back through would
+    # show it stale data.
+    import types
+    never_written = (tuple, frozenset, type, types.FunctionType,
+                     types.BuiltinFunctionType, types.MethodType,
+                     types.MethodWrapperType)
+    targets = {{}}
+    try:
+        for name in {_P}written:
+            if name in {_P}env:
+                for obj in {_P}reach([{_P}env[name]], False, set()):
+                    if not isinstance(obj, never_written):
+                        targets.setdefault(id(obj), name)
+        if not targets:
+            return []
+        readers = [(name, {_P}env[name]) for name in {_P}read if name in {_P}env]
+        if {_P}items is not None:
+            readers.append(({_ITEMS!r}, {_P}items))
+        found = []
+        seen = set()
+        for name, value in readers:
+            for obj in {_P}reach([value], True, seen):
+                if id(obj) in targets:
+                    found.append((name, targets[id(obj)]))
+                    break
+        return found
+    except OverflowError:
+        return [(None, sorted({_P}written)[0])]
+
+
+def {_P}index({_P}env, {_P}items):
+    # Where each object the chunk was handed lives: {{id: (path, object)}}.
+    # A path names a variable or an item, then steps into lists, tuples,
+    # dict values and attributes. It is how an object that existed before
+    # the loop is named in the log instead of being copied into it.
+    import types
+    atomic = (int, float, complex, str, bytes, bool, type(None), range)
+    opaque = (type, types.ModuleType, types.FunctionType)
+    table = {{}}
+    stack = []
+    if type({_P}items) is not range:
+        stack.extend(
+            ((("i", position),), item)
+            for position, item in enumerate({_P}items)
+        )
+    stack.extend(((("e", name),), {_P}env[name]) for name in sorted({_P}env))
+    while stack and len(table) < {_WALK_LIMIT}:
+        path, obj = stack.pop()
+        if type(obj) in atomic or id(obj) in table:
+            continue
+        table[id(obj)] = (path, obj)
+        if isinstance(obj, list):
+            stack.extend(
+                (path + (("s", k),), e) for k, e in enumerate(list.__iter__(obj))
+            )
+        elif isinstance(obj, tuple):
+            stack.extend(
+                (path + (("s", k),), e) for k, e in enumerate(tuple.__iter__(obj))
+            )
+        elif isinstance(obj, dict):
+            stack.extend(
+                (path + (("v", k),), e) for k, e in enumerate(dict.values(obj))
+            )
+        if not isinstance(obj, opaque):
+            attributes = getattr(obj, "__dict__", None)
+            if type(attributes) is dict:
+                stack.extend(
+                    (path + (("a", name),), e)
+                    for name, e in attributes.items()
+                    if type(name) is str
+                )
+    return table
+
+
+def {_P}dump({_P}log, {_P}table):
+    # The log as bytes, a pre-existing object written as its path. Returns
+    # (bytes, the variables those paths start from, what went wrong).
+    import io
+    import pickle
+    import types
+    try:
+        from cloudpickle import Pickler as base
+    except ImportError:
+        base = pickle.Pickler
+    here = {_P}dump.__code__.co_filename
+    table = {_P}table  # a name starting __ is rewritten inside a class
+    used = set()
+    escaped = []
+
+    class Tokens(base):
+        def persistent_id(self, obj):
+            entry = table.get(id(obj))
+            if entry is not None and entry[1] is obj:
+                path = entry[0]
+                used.add(path[0][1] if path[0][0] == "e" else {_ITEMS!r})
+                return path
+            if (
+                type(obj) is types.FunctionType
+                and obj.__closure__
+                and obj.__code__.co_filename == here
+            ):
+                escaped.append(obj.__name__)
+            return None
+
+    buffer = io.BytesIO()
+    try:
+        Tokens(buffer, protocol=4).dump({_P}log)
+    except Exception as error:
+        return None, [], (
+            "a value it collects, which cannot be copied between processes "
+            "(%s: %s)" % (type(error).__name__, error)
+        )
+    if escaped:
+        return None, [], (
+            "the variables of a function defined in the loop body (%s), "
+            "which is kept after its iteration" % escaped[0]
+        )
+    return buffer.getvalue(), sorted(used), None
+
+
+def {_P}load({_P}blobs, {_P}env, {_P}items):
+    # The chunks' logs as one list, each path replaced by the object it
+    # names *here*.
+    import io
+    import pickle
+    values = {{}}
+
+    def resolve(path, start):
+        if path[0][0] == "e":
+            obj = {_P}env[path[0][1]]
+        else:
+            obj = {_P}items[start + path[0][1]]
+        for kind, key in path[1:]:
+            if kind == "s":
+                obj = (list if isinstance(obj, list) else tuple).__getitem__(obj, key)
+            elif kind == "v":
+                if id(obj) not in values:
+                    values[id(obj)] = (obj, list(dict.values(obj)))
+                obj = values[id(obj)][1][key]
+            else:
+                obj = obj.__dict__[key]
+        return obj
+
+    class Tokens(pickle.Unpickler):
+        start = 0
+
+        def persistent_load(self, path):
+            return resolve(path, self.start)
+
+    log = []
+    for blob, start in {_P}blobs:
+        reader = Tokens(io.BytesIO(blob))
+        reader.start = start
+        log.extend(reader.load())
+    return log
 """
 
 
@@ -1089,9 +1411,6 @@ def _generate(
     defined_before: Set[str],
 ) -> Tuple[ast.Module, Tuple[str, ...], Tuple[str, ...]]:
     accumulators = set(analysis.accumulators)
-    # Seeded at the top of each iteration: the generator's state afterwards
-    # says nothing about whether iterations depend on each other.
-    watch_rng = not _body_seeds_global_rng(loop.body)
     body_names = tuple(sorted((_loaded(loop.body) & defined_before) - accumulators))
     post_names = tuple(sorted(((_loaded(after) & defined_before) | accumulators)))
     env_names = tuple(sorted(set(body_names) | set(post_names)))
@@ -1102,20 +1421,22 @@ def _generate(
         pre_body.extend(_parse_statements(f"{name} = {_P}args[{name!r}]"))
     transformer = _ReturnsAsTuples()
     pre_body.extend(transformer.visit(copy.deepcopy(stmt)) for stmt in before)
+    written = tuple(sorted(accumulators))
     pre_body.extend(_parse_statements(f"""
             {_P}items = {ast.unparse(loop.iter)}
-            if not isinstance({_P}items, range):
-                {_P}items = list({_P}items)
             {_P}scope = locals()
             {_P}found = {{{_P}n: {_P}scope[{_P}n] for {_P}n in {env_names!r} if {_P}n in {_P}scope}}
-            return (
-                "env",
-                {_P}found,
-                {_P}items,
-                {_P}aliases({_P}found, {tuple(sorted(accumulators))!r}, {body_names!r}),
-            )
+            # Searched before the items are listed: a generator may be
+            # reading what the loop collects, and listing it would use it up.
+            {_P}shared = {_P}aliases({_P}found, {written!r}, {body_names!r}, {_P}items)
+            if not {_P}shared and not isinstance({_P}items, range):
+                {_P}items = list({_P}items)
+                {_P}shared = {_P}aliases({_P}found, {written!r}, (), {_P}items)
+            if {_P}shared and {_P}inline:
+                return ("fallback", {_P}shared, {_P}rest({_P}found, {_P}items))
+            return ("env", {_P}found, {_P}items, {_P}shared)
             """))
-    pre = _function(f"{_P}pre", [f"{_P}args"], pre_body)
+    pre = _function(f"{_P}pre", [f"{_P}args", f"{_P}inline=False"], pre_body)
 
     # -- body -----------------------------------------------------------------
     # Rewritten on a copy: the original statements are still being analysed
@@ -1133,7 +1454,8 @@ def _generate(
                 {_P}watched[{_ITEMS!r}] = {_P}items
             {_P}names = ({_ITEMS!r},) + {body_names!r}
             {_P}before = {_P}fingerprint({_P}watched, {_P}names)
-            {_P}rng_before = {_P}rng_state() if {watch_rng!r} else None
+            {_P}rng_before = {_P}rng_state()
+            {_P}table = {_P}index({_P}env, {_P}items)
             {_P}log = []
             """))
     body_statements.append(
@@ -1147,18 +1469,24 @@ def _generate(
     body_statements.extend(_parse_statements(f"""
             {_P}after = {_P}fingerprint({_P}watched, {_P}names)
             {_P}changed = sorted(n for n in {_P}before if {_P}before[n] != {_P}after[n])
-            if {watch_rng!r} and {_P}rng_state() != {_P}rng_before:
-                {_P}changed.append({_RNG!r})
-            return (
-                {_P}log,
-                {_P}changed,
-                sorted(n for n in {_P}before if {_P}before[n] is None),
+            {_P}changed.extend(
+                n + ", which could not be checked for changes"
+                for n in sorted({_P}before) if {_P}before[n] is None
             )
+            if {_P}rng_state() != {_P}rng_before:
+                {_P}changed.append({_RNG!r})
+            {_P}blob, {_P}used, {_P}problem = {_P}dump({_P}log, {_P}table)
+            if {_P}problem is not None:
+                {_P}changed.append({_P}problem)
+            return ({_P}blob, {_P}changed, {_P}used)
             """))
     body = _function(f"{_P}body", [f"{_P}env", f"{_P}items"], body_statements)
 
     # -- post -----------------------------------------------------------------
     post_statements: List[ast.stmt] = _bind_from_env(post_names)
+    post_statements.extend(
+        _parse_statements(f"{_P}log = {_P}load({_P}blobs, {_P}env, {_P}items)")
+    )
     if sites:
         branches: Optional[ast.stmt] = None
         for number, site in reversed(list(enumerate(sites))):
@@ -1186,7 +1514,9 @@ def _generate(
             )
         )
     post_statements.extend(copy.deepcopy(stmt) for stmt in after)
-    post = _function(f"{_P}post", [f"{_P}env", f"{_P}log"], post_statements)
+    post = _function(
+        f"{_P}post", [f"{_P}env", f"{_P}blobs", f"{_P}items"], post_statements
+    )
 
     # -- rest: the original loop and what follows it, unsplit -----------------
     rest_statements: List[ast.stmt] = _bind_from_env(env_names)
@@ -1336,8 +1666,14 @@ def _comprehension_as_loop(stmt: ast.stmt, number: int) -> Optional[List[ast.stm
 # --------------------------------------------------------------------------
 
 
-def _is_cheap_expression(node: ast.expr) -> bool:
-    """True when evaluating ``node`` does no work that belongs on a cluster."""
+def _is_cheap_expression(node: ast.expr, local_names: Set[str]) -> bool:
+    """True when evaluating ``node`` does no work that belongs on a cluster,
+    and reads nothing that could be different there.
+
+    ``os.environ["HOME"]`` and ``sys.platform`` are cheap and wrong: they
+    are facts about the machine they are evaluated on. So an attribute or an
+    index is allowed only on a variable of the function itself.
+    """
     for sub in ast.walk(node):
         if isinstance(sub, ast.Call):
             function = sub.func
@@ -1348,6 +1684,12 @@ def _is_cheap_expression(node: ast.expr) -> bool:
             return False
         if isinstance(sub, (*_COMPREHENSIONS, ast.Lambda, ast.Await, ast.Yield)):
             return False
+        if isinstance(sub, (ast.Attribute, ast.Subscript)):
+            root: ast.expr = sub
+            while isinstance(root, (ast.Attribute, ast.Subscript)):
+                root = root.value
+            if isinstance(root, ast.Name) and root.id not in local_names:
+                return False
     return True
 
 
@@ -1355,35 +1697,144 @@ def _is_plain_target(target: ast.expr) -> bool:
     """A name, or a tuple or list of them: binding it runs no code."""
     if isinstance(target, (ast.Tuple, ast.List)):
         return all(_is_plain_target(element) for element in target.elts)
+    if isinstance(target, ast.Starred):
+        return _is_plain_target(target.value)
     return isinstance(target, ast.Name)
 
 
-def _is_cheap_block(statements: Sequence[ast.stmt]) -> bool:
+def _is_cheap_block(statements: Sequence[ast.stmt], local_names: Set[str]) -> bool:
     """True for a block of imports and of plain assignments and returns of
-    cheap expressions.
+    cheap expressions. ``local_names`` are the function's own variables on
+    entry to the block; the block's assignments are added as it goes.
 
     An import counts as cheap although it runs code: a function whose only
     preparation is ``import os`` should not cost a job for it. If the module
     is not installed where the caller is, :func:`run` notices and runs the
-    block where the rest of the work runs instead.
+    block where the rest of the work runs instead. What it imports is not
+    one of the function's own variables, though: ``os.getcwd()`` after it is
+    still a question about a machine.
     """
+    known = set(local_names)
     for stmt in statements:
         if isinstance(stmt, (ast.Pass, ast.Import, ast.ImportFrom)):
+            known -= _stored([stmt])
             continue
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
             continue  # a docstring
         if isinstance(stmt, ast.Return):
-            if stmt.value is not None and not _is_cheap_expression(stmt.value):
+            if stmt.value is not None and not _is_cheap_expression(stmt.value, known):
                 return False
             continue
         if isinstance(stmt, ast.Assign) and all(
             _is_plain_target(target) for target in stmt.targets
         ):
-            if not _is_cheap_expression(stmt.value):
+            if not _is_cheap_expression(stmt.value, known):
                 return False
+            known |= _stored(stmt.targets)
             continue
         return False
     return True
+
+
+#: Instructions whose presence depends on how the source was laid out or on
+#: how long the code is, not on what it does.
+_LAYOUT_ONLY = frozenset({"PUSH_NULL", "PRECALL", "EXTENDED_ARG", "NOP", "CACHE"})
+_SAME_INSTRUCTION = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
+_JUMPS = frozenset(dis.hasjrel) | frozenset(dis.hasjabs)
+
+
+def _instructions(code: types.CodeType) -> List[Tuple[str, Any]]:
+    """What ``code`` does, as a list that ignores where its source lines fall.
+
+    Bytecode is not a pure function of the syntax tree: the compiler picks
+    a shorter sequence for ``obj.method(x)`` when the call sits on one line,
+    and a tool that rewrites a module as it is imported (pytest does, for
+    ``assert``) moves lines without changing meaning. Jump distances shift
+    with either. Everything else is compared.
+    """
+    result = []
+    for instruction in dis.get_instructions(code):
+        name = _SAME_INSTRUCTION.get(instruction.opname, instruction.opname)
+        if name in _LAYOUT_ONLY:
+            continue
+        value: Any = instruction.argval
+        if instruction.opcode in _JUMPS or isinstance(value, types.CodeType):
+            value = None
+        elif not isinstance(value, (str, int, float, bytes, type(None), tuple)):
+            value = repr(value)
+        result.append((name, (type(value).__name__, value)))
+    return result
+
+
+def _same_code(ours: types.CodeType, theirs: types.CodeType) -> bool:
+    """Whether two code objects are the same program, wherever they came from."""
+    for attribute in ("co_names", "co_varnames", "co_freevars"):
+        if getattr(ours, attribute) != getattr(theirs, attribute):
+            return False
+    if _instructions(ours) != _instructions(theirs):
+        return False
+    if len(ours.co_consts) != len(theirs.co_consts):
+        return False
+    for mine, other in zip(ours.co_consts, theirs.co_consts):
+        if isinstance(mine, types.CodeType) and isinstance(other, types.CodeType):
+            if not _same_code(mine, other):
+                return False
+        elif type(mine) is not type(other) or mine != other:
+            return False
+    return True
+
+
+def _compiles_to(node: ast.FunctionDef, func: Callable) -> bool:
+    """Whether ``node``, compiled on its own, is the code ``func`` runs.
+
+    It is not when the file was edited after it was imported, when the
+    source found belongs to some other function of the same name, or when
+    the function only means what it does inside its class (``self.__x`` is
+    stored under another name there, and ``super()`` needs the class). The
+    split is compiled from this source on its own, so in each of those cases
+    it would be a different program.
+    """
+    code = func.__code__
+    if "__class__" in code.co_freevars:
+        return False  # super(): only meaningful inside its class
+    alone = copy.deepcopy(node)
+    alone.decorator_list = []
+    statements: List[ast.stmt] = [alone]
+    if code.co_freevars:
+        # Compile it as a closure over the same names, as it was.
+        outer = _function(
+            f"{_P}outer",
+            [],
+            [
+                *_parse_statements(
+                    "\n".join(f"{name} = None" for name in code.co_freevars)
+                ),
+                alone,
+            ],
+        )
+        statements = [outer]
+    module = ast.Module(body=statements, type_ignores=[])
+    ast.fix_missing_locations(module)
+    futures = 0
+    for feature in __future__.all_feature_names:
+        futures |= getattr(__future__, feature).compiler_flag
+    try:
+        compiled = compile(
+            module,
+            "<clustrix check>",
+            "exec",
+            flags=code.co_flags & futures,
+            dont_inherit=True,
+        )
+    except (SyntaxError, ValueError):
+        return False
+    pending = [compiled]
+    while pending:
+        candidate = pending.pop()
+        if candidate.co_name == node.name and candidate is not compiled:
+            return _same_code(candidate, code)
+        pending.extend(c for c in candidate.co_consts if isinstance(c, types.CodeType))
+    return False
 
 
 def _function_source(func: Callable) -> ast.FunctionDef:
@@ -1418,6 +1869,12 @@ def _function_source(func: Callable) -> ast.FunctionDef:
             ]
             if list(declared) != written:
                 raise ValueError("the source found does not belong to this function")
+            if not _compiles_to(node, func):
+                raise ValueError(
+                    "the source found is not what the function runs: the "
+                    "file changed after it was loaded, or the function uses "
+                    "super() or a class-private name"
+                )
             return node
     raise ValueError("the source does not contain a plain function definition")
 
@@ -1427,12 +1884,19 @@ def plan(func: Callable) -> ParallelPlan:
 
     Never raises for a function it cannot handle: the returned plan says why.
     """
-    func = inspect.unwrap(func)
     name = getattr(func, "__name__", repr(func))
     result = ParallelPlan(func_name=name)
 
     if not inspect.isfunction(func):
         result.unavailable = "not a Python function"
+        return result
+    if hasattr(func, "__wrapped__"):
+        # ``inspect`` would hand back the source of the function inside, and
+        # running a split of that would skip whatever the wrapper does.
+        result.unavailable = (
+            "it is wrapped by another decorator, whose own code a split "
+            "would skip; put @cluster directly on the function with the loop"
+        )
         return result
     if inspect.isgeneratorfunction(func) or inspect.iscoroutinefunction(func):
         result.unavailable = "generators and coroutines are not split"
@@ -1453,22 +1917,19 @@ def plan(func: Callable) -> ParallelPlan:
         result.unavailable = f"its source is not available ({error})"
         return result
 
-    arguments = function.args
-    parameters = [
-        argument.arg
-        for argument in [
-            *arguments.posonlyargs,
-            *arguments.args,
-            *([arguments.vararg] if arguments.vararg else []),
-            *arguments.kwonlyargs,
-            *([arguments.kwarg] if arguments.kwarg else []),
-        ]
-    ]
+    parameters = _parameter_names(function.args)
 
-    declared_outer: Set[str] = set()
-    for stmt in _statements(function.body):
-        if isinstance(stmt, (ast.Global, ast.Nonlocal)):
-            declared_outer.update(stmt.names)
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            # Split, the function's pieces run in scopes of their own and,
+            # for the loop, in other processes; an assignment to a variable
+            # that lives outside the function would land in the wrong place.
+            result.unavailable = (
+                f"line {node.lineno} declares {', '.join(node.names)} "
+                f"{'global' if isinstance(node, ast.Global) else 'nonlocal'}; "
+                "a function that assigns variables outside itself is not split"
+            )
+            return result
 
     # Comprehension statements become explicit loops so one analysis serves both.
     statements: List[ast.stmt] = []
@@ -1476,24 +1937,19 @@ def plan(func: Callable) -> ParallelPlan:
         rewritten = _comprehension_as_loop(stmt, number)
         statements.extend(rewritten if rewritten is not None else [stmt])
 
-    def resolve(identifier: str) -> Tuple[bool, Any]:
-        """What a free name in the function refers to right now, if anything."""
-        if func.__closure__ and identifier in func.__code__.co_freevars:
-            cell = func.__closure__[func.__code__.co_freevars.index(identifier)]
-            try:
-                return True, cell.cell_contents
-            except ValueError:
-                return False, None
-        if identifier in func.__globals__:
-            return True, func.__globals__[identifier]
-        return False, None
+    imported = {
+        name
+        for node in ast.walk(function)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for name in _stored([node])
+    }
 
     for index, stmt in enumerate(statements):
         if not isinstance(stmt, ast.For):
             continue
         before, after = statements[:index], statements[index + 1 :]
-        analysis, sites = _analyse_loop(
-            stmt, before, after, set(parameters), declared_outer, resolve
+        analysis, sites, assumed_code = _analyse_loop(
+            stmt, before, after, set(parameters), functools.partial(_is_code, func)
         )
         result.loops.append(analysis)
         if result.chosen is not None or not analysis.parallelizable:
@@ -1506,15 +1962,24 @@ def plan(func: Callable) -> ParallelPlan:
         result.chosen = analysis
         result.body_names = body_names
         result.post_names = post_names
-        result.pre_is_cheap = _is_cheap_block(before) and _is_cheap_expression(
-            stmt.iter
+        result.assumed_code = tuple(sorted(assumed_code))
+        own = set(parameters) - imported
+        result.pre_is_cheap = _is_cheap_block(before, own) and _is_cheap_expression(
+            stmt.iter, (own | _stored(before)) - imported
         )
-        result.post_is_cheap = _is_cheap_block(after)
+        result.post_is_cheap = _is_cheap_block(
+            after, (own | _stored(before) | _stored([stmt])) - imported
+        )
     return result
 
 
 def explain(func: Callable) -> str:
-    """Say whether ``func`` would be split across jobs, and why or why not."""
+    """Say whether ``func`` would be split across jobs, and why or why not.
+
+    Accepts the function as written or as ``@cluster`` returns it.
+    """
+    if hasattr(func, "_cluster_config") and hasattr(func, "__wrapped__"):
+        func = func.__wrapped__
     return plan(func).explain()
 
 
@@ -1531,10 +1996,12 @@ class SplitFunctions:
     when a split turns out not to be safe after ``pre`` has already run.
     """
 
-    pre: Callable[[Dict[str, Any]], tuple]
+    pre: Callable[..., tuple]
     body: Callable[[Dict[str, Any], Sequence[Any]], tuple]
-    post: Callable[[Dict[str, Any], List[tuple]], Any]
+    post: Callable[[Dict[str, Any], List[tuple], Optional[Sequence[Any]]], Any]
     rest: Callable[[Dict[str, Any], Sequence[Any]], Any]
+    #: ``aliases(env, written, read)``: the run-time search for shared objects.
+    aliases: Callable[..., List[tuple]]
 
 
 def bind(parallel_plan: ParallelPlan, func: Callable) -> SplitFunctions:
@@ -1546,7 +2013,6 @@ def bind(parallel_plan: ParallelPlan, func: Callable) -> SplitFunctions:
     """
     if parallel_plan.code is None:
         raise ValueError(f"{parallel_plan.func_name} has no loop to split")
-    func = inspect.unwrap(func)
     namespace: Dict[str, Any] = dict(func.__globals__)
     if func.__closure__:
         for cell_name, cell in zip(func.__code__.co_freevars, func.__closure__):
@@ -1563,12 +2029,13 @@ def bind(parallel_plan: ParallelPlan, func: Callable) -> SplitFunctions:
         body=namespace[f"{_P}body"],
         post=namespace[f"{_P}post"],
         rest=namespace[f"{_P}rest"],
+        aliases=namespace[f"{_P}aliases"],
     )
 
 
 def bound_arguments(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """``args``/``kwargs`` as the function's own parameter names would see them."""
-    bound = inspect.signature(inspect.unwrap(func)).bind(*args, **kwargs)
+    bound = inspect.signature(func).bind(*args, **kwargs)
     bound.apply_defaults()
     return dict(bound.arguments)
 
@@ -1593,7 +2060,7 @@ def will_be_abandoned(chunk_results: Sequence[tuple]) -> bool:
     For a backend that holds something back until the outcome is known --
     what the chunks printed, say, which the unsplit loop will print again.
     """
-    return any(changed for _log, changed, _unchecked in chunk_results)
+    return any(changed for _log, changed, _used in chunk_results)
 
 
 #: ``invoke(function, *arguments)``: run one of the split's functions
@@ -1625,6 +2092,10 @@ def run(
     results in chunk order. Both conditions are what make an abandoned split
     harmless: nothing a chunk did -- to the environment, or to this
     process's random generators -- is visible when the original loop runs.
+    A backend that cannot copy ``env`` or a chunk raises :class:`CannotShip`,
+    and the loop runs in order instead. An exception from an iteration must
+    come out of ``map_chunks`` as the one from the earliest failing chunk:
+    that is the one a sequential run would have raised.
 
     ``invoke`` runs the code around the loop. It is used for ``pre`` unless
     the plan found that code cheap enough to run here, for ``post`` likewise,
@@ -1647,57 +2118,125 @@ def run(
     ``on_unsplit(count, seconds)`` is told how long that run took by the
     wall clock, so the caller can decide differently next time.
     """
+    name = parallel_plan.func_name
+
+    def tell(reason: str) -> None:
+        if on_fallback is not None:
+            on_fallback(f"{name}: not split -- {reason}")
+
+    changed_kind = [
+        identifier
+        for identifier in parallel_plan.assumed_code
+        if not _is_code(func, identifier)
+    ]
+    if changed_kind:
+        # The plan was made when this name was a module, a function or a
+        # class. It is data now, and the loop writes to it.
+        tell(
+            f"{changed_kind[0]} is not created in this function and the "
+            "loop changes it; a change made in a worker would be lost"
+        )
+        return invoke(functools.partial(func, *args, **kwargs))
+
     split = bind(parallel_plan, func)
     arguments = bound_arguments(func, args, kwargs)
     around_pre = _here if parallel_plan.pre_is_cheap else invoke
     around_post = _here if parallel_plan.post_is_cheap else invoke
 
+    # Wherever ``pre`` runs away from here, it runs the loop itself if the
+    # aliasing check fails: the values are there, and may not travel.
     try:
-        outcome = around_pre(split.pre, arguments)
+        outcome = around_pre(split.pre, arguments, around_pre is not _here)
     except ImportError:
         if around_pre is invoke:
             raise
         # ``pre`` was run here because it only imports and assigns, and a
         # module it imports is not installed here. It may be where the work
         # runs; an import that fails there too is raised from there.
-        outcome = invoke(split.pre, arguments)
+        outcome = invoke(split.pre, arguments, invoke is not _here)
     if outcome[0] == "return":
         return outcome[1]
+
+    def shared(aliases: List[tuple]) -> str:
+        reader, collected = aliases[0]
+        if reader is None:
+            return (
+                "there are too many values to check that none of them is "
+                f"what {collected} collects into"
+            )
+        return (
+            f"{reader} can reach an object {collected} collects into, so an "
+            "iteration could see what earlier ones collected"
+        )
+
+    if outcome[0] == "fallback":
+        tell(shared(outcome[1]))
+        return outcome[2]
     _, env, items, aliases = outcome
 
     def unsplit(reason: str) -> Any:
-        if on_fallback is not None:
-            on_fallback(f"{parallel_plan.func_name}: not split -- {reason}")
+        tell(reason)
         return invoke(split.rest, env, items)
 
     if aliases:
-        reader, collected = aliases[0]
-        return unsplit(
-            f"{reader} can reach the same object as {collected}, so an "
-            "iteration can see what earlier ones collected"
+        return unsplit(shared(aliases))
+
+    if not len(items):
+        return around_post(
+            split.post,
+            {key: env[key] for key in parallel_plan.post_names if key in env},
+            [],
+            None,
         )
 
-    body_env = {name: env[name] for name in parallel_plan.body_names if name in env}
-    post_env = {name: env[name] for name in parallel_plan.post_names if name in env}
+    if should_split is not None and not should_split(len(items)):
+        started = time.perf_counter()
+        result = invoke(split.rest, env, items)
+        if on_unsplit is not None:
+            on_unsplit(len(items), time.perf_counter() - started)
+        return result
 
-    log: List[tuple] = []
-    if len(items):
-        if should_split is not None and not should_split(len(items)):
-            started = time.perf_counter()
-            result = invoke(split.rest, env, items)
-            if on_unsplit is not None:
-                on_unsplit(len(items), time.perf_counter() - started)
-            return result
-        modified: Set[str] = set()
-        for chunk_log, changed, _unchecked in map_chunks(
-            split.body, body_env, chunk(items, jobs)
+    body_env = {key: env[key] for key in parallel_plan.body_names if key in env}
+    chunks = chunk(items, jobs)
+    try:
+        results = map_chunks(split.body, body_env, chunks)
+    except CannotShip as error:
+        return unsplit(str(error))
+    except Exception:
+        collected = tuple(parallel_plan.chosen.accumulators)  # type: ignore[union-attr]
+        handed_in = {f"argument {key}": value for key, value in arguments.items()}
+        if invoke is _here and split.aliases(
+            {**handed_in, **{key: env[key] for key in collected if key in env}},
+            collected,
+            tuple(handed_in),
         ):
-            log.extend(chunk_log)
-            modified.update(changed)
-        if modified:
-            return unsplit(
-                f"the loop changed {', '.join(sorted(modified))}, which its "
-                "iterations share"
-            )
+            # The caller can see what the loop collects into. A direct call
+            # would have left there everything collected before the error;
+            # running the loop in order here does the same and then raises
+            # the same error. Not a failed check, so nobody is told.
+            return split.rest(env, items)
+        raise
 
-    return around_post(split.post, post_env, log)
+    blobs: List[tuple] = []
+    modified: Set[str] = set()
+    named: Set[str] = set()
+    start = 0
+    for piece, (blob, changed, used) in zip(chunks, results):
+        blobs.append((blob, start))
+        start += len(piece)
+        modified.update(changed)
+        named.update(used)
+    if modified:
+        return unsplit(
+            f"the loop changed {', '.join(sorted(modified))}, which its "
+            "iterations share. That was found after the loop had been run "
+            "in pieces, so anything it does besides computing (writing a "
+            "file, calling a service) happened in that attempt as well"
+        )
+
+    # ``post`` gets what it reads, and whatever the log names instead of
+    # copying: an object that existed before the loop is put back as itself.
+    post_env = {
+        key: env[key] for key in set(parallel_plan.post_names) | named if key in env
+    }
+    return around_post(split.post, post_env, blobs, items if _ITEMS in named else None)

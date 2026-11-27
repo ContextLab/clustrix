@@ -251,7 +251,6 @@ INDEPENDENT = [
     (method_with_keywords, (["ccc", "a", "bb", "dddd"],), {}),
     (keyword_and_default_arguments, ([1, 2, 3],), {"power": 3, "tag": 1, "b": 2}),
     (seeds_its_own_generator, (6,), {}),
-    (seeds_the_global_generator_each_iteration, (6,), {}),
     (imports_inside_and_calls_into_the_module, (6,), {}),
 ]
 
@@ -627,14 +626,14 @@ REFUSED = [
     (running_total, "previous", "previous iteration"),
     (stops_early, "break", "break"),
     (reads_what_it_collects, "out", "also read"),
-    (writes_a_global, "LEDGER", "global"),
+    (writes_a_global, "LEDGER", "not created in this function"),
     (uses_the_last_value, "doubled", "after it"),
     (unseeded_global_random, "random.random", "random generator"),
+    (seeds_the_global_generator_each_iteration, "random.seed", "random generator"),
     (returns_from_the_loop, "returns", "returns"),
     (conditional_carry, "last_positive", "previous iteration"),
     (loop_with_else, "else", "else"),
     (augmented_and_tested, "total", "previous iteration"),
-    (assigns_a_declared_global, "LEDGER", "global"),
 ]
 
 
@@ -1035,3 +1034,561 @@ def test_explain_names_a_comprehension_s_variables_as_the_source_does():
 
     assert "__cx_" not in report
     assert "for x in xs" in report
+
+
+# -- found by an adversarial review: every one of these once returned a wrong
+# -- answer, silently, or crashed -----------------------------------------------
+
+
+def outcome_of(func, *args, jobs=3, **run_options):
+    """``(how, result)``: how the engine dealt with ``func`` and what came back.
+
+    ``how`` is "unavailable" (never analysed), "refused" (a blocker),
+    "fallback" (split, then abandoned at run time) or "split".
+    """
+    plan = parallelize.plan(func)
+    if plan.unavailable:
+        return "unavailable", plan.unavailable
+    if not plan.parallelizable:
+        return "refused", plan.explain()
+    reasons = []
+    result = parallelize.run(
+        plan,
+        func,
+        args,
+        {},
+        in_process,
+        jobs,
+        on_fallback=reasons.append,
+        **run_options,
+    )
+    return ("fallback" if reasons else "split"), result
+
+
+def collects_one_shared_row(n):
+    row = []
+    out = []
+    for i in range(n):
+        out.append(row)
+    row.append(1)
+    return out
+
+
+def collects_its_items_then_marks_them(nodes):
+    by_value = {}
+    for node in nodes:
+        by_value[node["v"]] = node
+    for node in nodes:
+        node["seen"] = True
+    return by_value
+
+
+def collects_its_items(xs):
+    kept = []
+    for x in xs:
+        kept.append(x)
+    return [a is b for a, b in zip(kept, xs)]
+
+
+def collects_part_of_a_value(table, n):
+    out = []
+    for i in range(n):
+        out.append(table["rows"][i % 2])
+    table["rows"][0].append("changed afterwards")
+    return out
+
+
+def unpacks_with_a_star(pairs):
+    out = []
+    for first, *others in pairs:
+        out.append((first, len(others)))
+    return out
+
+
+@pytest.mark.parametrize(
+    "func,make_args",
+    [
+        (collects_one_shared_row, lambda: (5,)),
+        (collects_its_items_then_marks_them, lambda: ([{"v": i} for i in range(5)],)),
+        (collects_its_items, lambda: ([[1], [2], [3], [4], [5]],)),
+        (collects_part_of_a_value, lambda: ({"rows": [["a"], ["b"]]}, 5)),
+        (unpacks_with_a_star, lambda: ([(1, 2, 3), (4,), (5, 6)],)),
+    ],
+    ids=lambda value: getattr(value, "__name__", None),
+)
+def test_an_object_that_existed_before_the_loop_is_collected_as_itself(func, make_args):
+    """A copy would not see what the code after the loop does to the original."""
+    expected = func(*make_args())
+
+    how, result = outcome_of(func, *make_args())
+
+    assert how == "split"
+    assert result == expected
+
+
+def keeps_functions_that_read_the_loop_variable(n):
+    made = []
+    for i in range(n):
+        made.append(lambda: i)
+    return [f() for f in made]
+
+
+def reads_the_collector_through_the_items(n):
+    out = []
+    pairs = list(zip(range(n), [out] * n))
+    for i, seen in pairs:
+        out.append(len(seen))
+    return out
+
+
+def reads_part_of_the_collector(xs):
+    box = {"seen": []}
+    seen = box["seen"]
+    out = []
+    for x in xs:
+        out.append(len(seen))
+        box["seen"].append(x)
+    return out
+
+
+def reads_the_collector_from_far_inside(n):
+    out = []
+    data = [out] + [object() for _ in range(250_000)]
+    result = []
+    for i in range(n):
+        result.append(len(data[0]))
+        out.append(i)
+    return result
+
+
+def reads_the_collector_through_a_class(n):
+    out = []
+
+    class Context:
+        seen = out
+
+    context = Context()
+    result = []
+    for i in range(n):
+        result.append(len(context.seen))
+        out.append(i)
+    return result
+
+
+def reads_the_collector_through_an_object_array(n):
+    import numpy as np
+
+    out = []
+    holder = np.empty(1, dtype=object)
+    holder[0] = out
+    result = []
+    for i in range(n):
+        result.append(len(holder[0]))
+        out.append(i)
+    return result
+
+
+def reads_the_collector_through_a_bound_method(n):
+    out = []
+    size = out.__len__
+    result = []
+    for i in range(n):
+        result.append(size())
+        out.append(i)
+    return result
+
+
+def loops_over_a_generator_fed_by_the_loop():
+    todo = [3]
+
+    def pending():
+        while todo:
+            yield todo.pop()
+
+    done = []
+    for x in pending():
+        done.append(x)
+        todo.extend([x - 1] if x > 0 else [])
+    return done
+
+
+def collects_generators(n):
+    out = []
+    for i in range(n):
+        out.extend(j for j in range(i))
+    return out
+
+
+@pytest.mark.parametrize(
+    "func,args",
+    [
+        (keeps_functions_that_read_the_loop_variable, (5,)),
+        (reads_the_collector_through_the_items, (5,)),
+        (reads_part_of_the_collector, ([5, 6, 7, 8],)),
+        (reads_the_collector_from_far_inside, (5,)),
+        (reads_the_collector_through_a_class, (5,)),
+        (reads_the_collector_through_an_object_array, (5,)),
+        (reads_the_collector_through_a_bound_method, (5,)),
+        (loops_over_a_generator_fed_by_the_loop, ()),
+        (collects_generators, (5,)),
+    ],
+    ids=lambda value: getattr(value, "__name__", None),
+)
+def test_what_only_real_values_reveal_ends_in_the_sequential_answer(func, args):
+    expected = func(*args)
+
+    how, result = outcome_of(func, *args)
+
+    assert how == "fallback"
+    assert result == expected
+
+
+RESULTS_ARRAY = __import__("numpy").zeros(4)
+QUEUE = __import__("collections").deque()
+
+
+def seeds_only_sometimes(n):
+    import random
+
+    out = []
+    for i in range(n):
+        if i % 2 == 0:
+            random.seed(i)
+        out.append(random.random())
+    return out
+
+
+def leaves_the_generator_for_later(n):
+    import random
+
+    out = []
+    for i in range(n):
+        random.seed(i)
+        out.append(random.random())
+    return random.random()
+
+
+def fills_a_global_array(n):
+    for i in range(n):
+        RESULTS_ARRAY[i] = i + 1
+    return RESULTS_ARRAY.tolist()
+
+
+def fills_a_global_queue(n):
+    for i in range(n):
+        QUEUE.append(i)
+    return list(QUEUE)
+
+
+def deletes_a_loop_variable_afterwards(n):
+    out = []
+    for i in range(n):
+        doubled = i * 2
+        out.append(doubled)
+    del doubled
+    return out
+
+
+def loops_into_an_attribute(box, xs):
+    out = []
+    for box.last in xs:
+        out.append(1)
+    return box.last
+
+
+def defines_a_reader_before_the_loop(xs):
+    total = 0
+
+    def report():
+        return f"total={total}"
+
+    for x in xs:
+        total += x
+    return report()
+
+
+def rebinds_after_the_loop_what_a_lambda_reads(xs):
+    scale = 1
+    scaled = lambda value: value * scale  # noqa: E731
+    out = []
+    for x in xs:
+        out.append(x)
+    scale = 10
+    return scaled(out[0])
+
+
+@pytest.mark.parametrize(
+    "func,because",
+    [
+        (seeds_only_sometimes, "random generator shared by the whole process"),
+        (
+            leaves_the_generator_for_later,
+            "random generator shared by the whole process",
+        ),
+        (fills_a_global_array, "RESULTS_ARRAY is not created in this function"),
+        (fills_a_global_queue, "QUEUE is not created in this function"),
+        (
+            deletes_a_loop_variable_afterwards,
+            "doubled is assigned in the loop and used after",
+        ),
+        (loops_into_an_attribute, "box.last, which is not a plain variable"),
+        (
+            defines_a_reader_before_the_loop,
+            "a function defined before the loop reads total",
+        ),
+        (
+            rebinds_after_the_loop_what_a_lambda_reads,
+            "a function defined before the loop reads scale",
+        ),
+    ],
+    ids=lambda value: getattr(value, "__name__", None),
+)
+def test_more_loops_that_are_refused_with_the_reason(func, because):
+    how, explanation = outcome_of(func)
+
+    assert how == "refused"
+    assert because in explanation
+
+
+CALLS = 0
+
+
+def counts_its_calls_in_a_global(xs):
+    global CALLS
+    CALLS += 1
+    out = []
+    for x in xs:
+        out.append(x * 2)
+    return CALLS
+
+
+def counts_in_the_enclosing_function(n):
+    count = 0
+
+    def bump():
+        nonlocal count
+        count += 1
+        return count
+
+    out = []
+    for i in range(n):
+        out.append(bump())
+    return out, count
+
+
+def doubled(function):
+    import functools
+
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        return 2 * function(*args, **kwargs)
+
+    return wrapper
+
+
+@doubled
+def summed_then_doubled(xs):
+    out = []
+    for x in xs:
+        out.append(x)
+    return sum(out)
+
+
+class Scaler:
+    def __init__(self):
+        self.__scale = 3
+
+    def score(self, x):
+        return x + 1
+
+    def with_a_private_name(self, xs):
+        out = []
+        for x in xs:
+            out.append(x * self.__scale)
+        return out
+
+
+class ChildScaler(Scaler):
+    def with_super(self, xs):
+        out = []
+        for x in xs:
+            out.append(super().score(x))
+        return out
+
+    def plainly(self, xs):
+        out = []
+        for x in xs:
+            out.append(self.score(x))
+        return out
+
+
+@pytest.mark.parametrize(
+    "func,because",
+    [
+        (counts_its_calls_in_a_global, "declares CALLS global"),
+        (counts_in_the_enclosing_function, "declares count nonlocal"),
+        (summed_then_doubled, "wrapped by another decorator"),
+        (Scaler.with_a_private_name, "not what the function runs"),
+        (ChildScaler.with_super, "not what the function runs"),
+        (
+            __import__("functools").partial(collects_its_items, [1]),
+            "not a Python function",
+        ),
+    ],
+    ids=lambda value: getattr(value, "__name__", None),
+)
+def test_functions_that_are_not_analysed_at_all(func, because):
+    plan = parallelize.plan(func)
+
+    assert not plan.parallelizable
+    assert because in (plan.unavailable or ""), plan.explain()
+
+
+def test_an_ordinary_method_is_still_split():
+    how, result = outcome_of(ChildScaler.plainly, ChildScaler(), [1, 2, 3, 4])
+
+    assert (how, result) == ("split", [2, 3, 4, 5])
+
+
+def test_source_edited_after_import_is_not_what_gets_split(tmp_path, monkeypatch):
+    """The split is compiled from the file; the function is what was loaded."""
+    import importlib
+    import linecache
+
+    source = "def f(xs):\n    out = []\n    for x in xs:\n        out.append(x + 1)\n    return out\n"
+    module_file = tmp_path / "edited_after_import.py"
+    module_file.write_text(source)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    module = importlib.import_module("edited_after_import")
+    assert parallelize.plan(module.f).parallelizable
+
+    module_file.write_text(source.replace("x + 1", "x - 1"))
+    linecache.checkcache(str(module_file))
+
+    plan = parallelize.plan(module.f)
+    assert not plan.parallelizable
+    assert "not what the function runs" in plan.unavailable
+    assert module.f([1, 2]) == [2, 3]
+
+
+def test_explain_reads_through_cluster_but_through_nothing_else():
+    from clustrix import cluster
+
+    assert "SPLIT" in parallelize.explain(cluster(cores=2)(squares))
+    assert "wrapped by another decorator" in parallelize.explain(
+        cluster(cores=2)(summed_then_doubled)
+    )
+
+
+def writer_into(store):
+    def collect(xs):
+        for x in xs:
+            store.append(x)
+        return len(store)
+
+    return collect
+
+
+class CountsAppends:
+    seen = []
+
+    @classmethod
+    def append(cls, value):
+        cls.seen.append(value)
+
+    @classmethod
+    def __len__(cls):
+        return len(cls.seen)
+
+
+def test_a_plan_made_when_a_name_was_code_is_not_used_once_it_is_data():
+    """Two closures of one source share a plan; what they close over differs."""
+    plan = parallelize.plan(writer_into(CountsAppends))
+    assert plan.parallelizable and plan.assumed_code == ("store",)
+
+    store = []
+    reasons = []
+    count = parallelize.run(
+        plan,
+        writer_into(store),
+        ([1, 2, 3, 4],),
+        {},
+        in_process,
+        2,
+        on_fallback=reasons.append,
+    )
+
+    assert (count, store) == (4, [1, 2, 3, 4])
+    assert "store is not created in this function" in reasons[0]
+
+
+def builds_paths_from_the_environment(names):
+    import os
+
+    base = os.environ["HOME"]
+    out = []
+    for name in names:
+        out.append(os.path.join(base, name))
+    return out
+
+
+def reads_only_its_own_arguments(settings, names):
+    prefix = settings["prefix"]
+    out = []
+    for name in names:
+        out.append(prefix + name)
+    return out
+
+
+def test_a_fact_about_the_machine_is_not_looked_up_in_the_caller():
+    """``os.environ`` here is not ``os.environ`` on the cluster."""
+    assert not parallelize.plan(builds_paths_from_the_environment).pre_is_cheap
+    assert parallelize.plan(reads_only_its_own_arguments).pre_is_cheap
+
+
+def divides_into_the_callers_list(xs, out):
+    for x in xs:
+        out.append(10 // x)
+    return out
+
+
+def test_an_error_leaves_the_caller_what_a_direct_call_would_have():
+    seen_directly = []
+    with pytest.raises(ZeroDivisionError):
+        divides_into_the_callers_list([1, 2, 5, 0, 5, 1], seen_directly)
+
+    seen = []
+    plan = parallelize.plan(divides_into_the_callers_list)
+    with pytest.raises(ZeroDivisionError):
+        parallelize.run(
+            plan,
+            divides_into_the_callers_list,
+            ([1, 2, 5, 0, 5, 1], seen),
+            {},
+            in_process,
+            3,
+        )
+
+    assert seen == seen_directly == [10, 5, 2]
+
+
+def test_a_backend_that_cannot_copy_a_value_gets_the_loop_run_in_order():
+    def cannot_ship(body, env, chunks):
+        raise parallelize.CannotShip("settings holds a lock, which cannot be copied")
+
+    plan = parallelize.plan(squares)
+    reasons = []
+    result = parallelize.run(
+        plan, squares, (6,), {}, cannot_ship, 3, on_fallback=reasons.append
+    )
+
+    assert result == squares(6)
+    assert "cannot be copied" in reasons[0]
+
+
+def test_a_fallback_found_before_any_chunk_does_not_claim_side_effects_happened():
+    _, early = run_with_fallback(reads_part_of_the_collector, [1, 2, 3])
+    _, late = run_with_fallback(mutates_what_it_reads, [1, 2, 3, 4], {})
+
+    assert "happened in that attempt" not in early[0]
+    assert "happened in that attempt" in late[0]
