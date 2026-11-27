@@ -1214,6 +1214,45 @@ def _encode_by_value(obj: Any, local_modules: List[Any]) -> bytes:
     )
 
 
+#: The name a job has when nothing better is known about it.
+DEFAULT_JOB_NAME = "clustrix"
+
+#: Longest name given to a scheduler. SLURM accepts far more, but ``squeue``
+#: shows eight characters by default and ``sacct`` ten; past a few dozen
+#: nobody is reading it.
+MAX_JOB_NAME_LENGTH = 48
+
+#: The file name ``clustrix.parallelize`` compiles a split loop under. It is
+#: the only place a piece of a split function still says which function it
+#: came from; ``tests/unit/test_job_names.py`` builds a real split and fails
+#: if the two ever stop agreeing.
+_SPLIT_ORIGIN = re.compile(r"<clustrix split of (?P<name>.+)>")
+
+
+def scheduler_job_name(func: Callable) -> str:
+    """What ``squeue`` should call a job running ``func``.
+
+    Every SLURM job used to be named ``clustrix``, so a queue of forty jobs
+    from three analyses was forty identical rows. The name is the
+    function's, and for a piece of a divided loop it is the name of the
+    function the loop is in, then which piece: ``simulate.body`` is a chunk
+    of iterations, ``simulate.pre`` and ``simulate.post`` the code around
+    the loop, ``simulate.rest`` the loop run whole.
+
+    Only letters, digits and ``_ . -`` survive, because the name is written
+    into an ``#SBATCH`` line, and it is cut to
+    :data:`MAX_JOB_NAME_LENGTH`. A function with no usable name gets
+    :data:`DEFAULT_JOB_NAME`.
+    """
+    name = str(getattr(func, "__name__", "") or "")
+    code = getattr(func, "__code__", None)
+    split = _SPLIT_ORIGIN.fullmatch(str(getattr(code, "co_filename", "")))
+    if split:
+        name = f"{split.group('name')}.{name.rsplit('_', 1)[-1]}"
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_.-")
+    return cleaned[:MAX_JOB_NAME_LENGTH].rstrip("_.-") or DEFAULT_JOB_NAME
+
+
 def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """
     Serialize function and all its dependencies.
@@ -1280,6 +1319,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     # Get function metadata
     func_info = {
         "name": func.__name__,
+        "job_name": scheduler_job_name(func),
         "module": func.__module__,
         "file": inspect.getfile(func) if hasattr(func, "__file__") else None,
         "source": None,
@@ -1898,6 +1938,7 @@ def _environment_key(
     python_version: str,
     requirements: Dict[str, str],
     config: Optional[ClusterConfig] = None,
+    interpreter: Optional[str] = None,
 ) -> str:
     """A short, stable name for an environment with these exact contents.
 
@@ -1905,6 +1946,11 @@ def _environment_key(
     same install policy get the same key, so the environment is built once and
     reused. Any difference produces a different key, so environments are never
     silently shared between jobs that need different packages.
+
+    ``interpreter`` is the ``python_executable`` the user named, when the
+    environment is built from it: two interpreters of one minor version are
+    still two installations, and naming a second one must build from it
+    rather than find the environment the first one made.
     """
     import hashlib
 
@@ -1925,6 +1971,7 @@ def _environment_key(
             "excluded=" + ",".join(excluded),
             "extra=" + ",".join(extra),
         ]
+        + ([f"interpreter={interpreter}"] if interpreter else [])
     )
     digest = hashlib.sha256(material.encode()).hexdigest()[:12]
     return f"py{python_version.replace('.', '')}_{digest}"
@@ -2317,6 +2364,7 @@ def setup_two_venv_environment(
     import sys
 
     local_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    named_python = configured_python(config)
 
     # Check if conda is available first - on many clusters, only conda Python
     # works. Two things make this harder than `conda --version`:
@@ -2387,6 +2435,32 @@ def setup_two_venv_environment(
         # has to agree on the interpreter version.
         compatible_python = "conda"  # Special marker to use conda
         remote_python_version = local_python_version
+        if named_python:
+            logger.info(
+                "python_executable=%r does not choose the interpreter of the "
+                "conda environments clustrix builds on this host: conda "
+                "creates them at Python %s itself.",
+                named_python,
+                local_python_version,
+            )
+    elif named_python:
+        # The user said which interpreter; build both virtualenvs from it
+        # and look for no other. This setting used to be read only by the
+        # single-venv path, so on the default path naming
+        # ``/opt/python/3.12/bin/python3`` changed nothing and the
+        # environments were built from whichever ``python3.x`` was first on
+        # PATH. It still has to be this session's minor version -- the
+        # bytecode rule below does not bend for an explicit choice.
+        probed = _probe_remote_pythons(ssh_client, [named_python], config)
+        if not probed:
+            raise RuntimeError(
+                f"python_executable={named_python!r} did not run on the "
+                "remote host, so no environment can be built from it. Name "
+                "an interpreter that exists there (an absolute path, or a "
+                "command on the PATH of a non-interactive shell), or leave "
+                "python_executable at its default to let clustrix look for "
+                f"a Python {local_python_version}."
+            )
     else:
         # Fall back to system Python search
         # Try to find system Python (many clusters don't have this accessible)
@@ -2404,6 +2478,8 @@ def setup_two_venv_environment(
         ]
 
         probed = _probe_remote_pythons(ssh_client, venv1_candidates, config)
+
+    if not conda_available:
 
         # Not "any Python 3 will do": the payload's bytecode is version-locked.
         compatible_python, remote_python_version = _select_remote_python(
@@ -2423,7 +2499,12 @@ def setup_two_venv_environment(
     # the first job's environments, and a job whose requirements differ gets
     # its own rather than silently inheriting the wrong ones. `conda create`
     # is skipped when the environment already exists.
-    env_key = _environment_key(remote_python_version, requirements, config)
+    env_key = _environment_key(
+        remote_python_version,
+        requirements,
+        config,
+        interpreter=None if conda_available else named_python,
+    )
 
     if compatible_python != "conda":
         # Plain virtualenvs, keyed on content exactly like the conda
@@ -2695,6 +2776,19 @@ def setup_python_compatible_environment(
         return setup_remote_environment(ssh_client, work_dir, requirements, config)
 
 
+def configured_python(config: Optional[ClusterConfig]) -> Optional[str]:
+    """The interpreter the user named in ``python_executable``, if they did.
+
+    The field's default, ``"python"``, is not a statement about any host --
+    Python 3 installs ship ``python3`` -- so it reads as "not set" and the
+    remote host is probed instead.
+    """
+    configured = str(getattr(config, "python_executable", None) or "").strip()
+    if not configured or configured == "python":
+        return None
+    return configured
+
+
 def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
     """Find a remote interpreter that can actually run this job.
 
@@ -2713,8 +2807,8 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
     `python3`, and `python` is only present where somebody added a
     compatibility symlink.
     """
-    configured = getattr(config, "python_executable", None)
-    if configured and configured != "python":
+    configured = configured_python(config)
+    if configured:
         return configured
 
     import sys as _sys
@@ -3520,13 +3614,19 @@ def create_job_script(
     job_config: Dict[str, Any],
     remote_job_dir: str,
     config: ClusterConfig,
+    job_name: str = DEFAULT_JOB_NAME,
 ) -> str:
-    """Create job submission script for different cluster types."""
+    """Create job submission script for different cluster types.
+
+    ``job_name`` is what the scheduler lists the job as -- see
+    :func:`scheduler_job_name`. The ``ssh`` backend has no scheduler and no
+    use for it.
+    """
 
     job_config = resolve_job_resources(job_config, config)
 
     if cluster_type == "slurm":
-        return _create_slurm_script(job_config, remote_job_dir, config)
+        return _create_slurm_script(job_config, remote_job_dir, config, job_name)
     elif cluster_type == "ssh":
         return _create_ssh_script(job_config, remote_job_dir, config)
     else:
@@ -3895,7 +3995,10 @@ def job_execution_lines(
 
 
 def _create_slurm_script(
-    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
+    job_config: Dict[str, Any],
+    remote_job_dir: str,
+    config: ClusterConfig,
+    job_name: str,
 ) -> str:
     """Create SLURM job script."""
 
@@ -3907,7 +4010,7 @@ def _create_slurm_script(
     job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
     script_lines = [
         "#!/bin/bash",
-        "#SBATCH --job-name=clustrix",
+        f"#SBATCH --job-name={validate_shell_fragment('job name', job_name)}",
         f"#SBATCH --output={job_dir}/slurm-%j.out",
         f"#SBATCH --error={job_dir}/slurm-%j.err",
         f"#SBATCH --cpus-per-task={validate_shell_fragment('cores', job_config['cores'])}",

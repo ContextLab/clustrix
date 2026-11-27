@@ -20,6 +20,7 @@ import threading
 from typing import Dict, Any, Optional
 
 from .utils import (
+    DEFAULT_JOB_NAME,
     create_job_script,
     resolve_named_environment,
     setup_remote_environment,
@@ -298,6 +299,7 @@ class SchedulerManager:
             job_config=job_config,
             remote_job_dir=remote_job_dir,
             config=updated_config,
+            job_name=func_data.get("func_info", {}).get("job_name") or DEFAULT_JOB_NAME,
         )
 
         # Upload and submit job script

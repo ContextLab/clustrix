@@ -549,13 +549,27 @@ Paths and the remote environment
        you packaged.
    * - ``python_executable``
      - ``"python"``
-     - Command used to create the single venv (``use_two_venv=False``) and to run the job
-       script. Note that many systems have no ``python``, only ``python3``;
-       ``resolve_remote_python`` probes for a working interpreter rather than
-       trusting this blindly. If the probe itself cannot be run -- a dropped
-       SSH transport, a closed session -- it raises saying so, rather than
-       reporting that the remote host has no matching interpreter: that would
-       be a claim about a machine clustrix never managed to ask.
+     - The remote interpreter the job's environments are built from. The
+       default, ``"python"``, means "not chosen": many systems have no
+       ``python``, only ``python3``, so clustrix looks on the remote host for
+       an interpreter of this session's Python minor version. Any other
+       value -- a command such as ``python3.12`` or an absolute path -- is
+       used as given and nothing else is looked for: both virtualenvs of the
+       default (two-venv) path are created by it, as is the single venv with
+       ``use_two_venv=False``. It must run on the remote host and be the
+       same minor version as the Python you submit from; on the default
+       path a job is otherwise refused at submission, with a message that
+       names the setting or the two versions (the single-venv path takes
+       the value as given and does not check it). Two
+       cases where it does **not** choose the build interpreter: on a host
+       where clustrix finds conda, the environments are conda environments
+       created at your Python version; and when you name an existing
+       environment (``conda_env_name`` / ``@cluster(environment=...)``),
+       it is the interpreter invoked *inside* that environment. If a probe
+       cannot be run at all -- a dropped SSH transport, a closed session --
+       clustrix raises saying so, rather than reporting that the remote host
+       has no matching interpreter: that would be a claim about a machine
+       clustrix never managed to ask.
    * - ``package_manager``
      - ``"pip"``
      - ``"pip"``, ``"uv"`` (``uv pip``), ``"conda"``, or ``"auto"`` (uv, then
