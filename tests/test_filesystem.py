@@ -7,7 +7,6 @@ import socket
 import tempfile
 import os
 from pathlib import Path
-import stat
 
 from clustrix.filesystem import (
     ClusterFilesystem,

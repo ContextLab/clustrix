@@ -13,12 +13,6 @@ import zipfile
 from pathlib import Path
 import pytest
 
-from clustrix.filesystem import (
-    ClusterFilesystem,
-    cluster_ls,
-    cluster_find,
-    cluster_stat,
-)
 from clustrix.dependency_analysis import analyze_function_dependencies
 from clustrix.file_packaging import package_function_for_execution
 from clustrix.config import ClusterConfig

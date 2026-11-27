@@ -6,7 +6,6 @@ import ast
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, mock_open
 import pytest
 
 from clustrix.dependency_analysis import (

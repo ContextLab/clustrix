@@ -519,7 +519,7 @@ class TestJobSubmissionEdgeCases:
     def executor(self):
         """A real executor. It has no connection, and does not need one.
 
-        The fixture used to install ``Mock()`` SSH and SFTP clients. The test
+        The fixture used to install stand-in SSH and SFTP clients. The test
         below rejects its cluster type before any connection is consulted, so
         the mocks were pure decoration -- and they hid the fact that the
         rejection happens that early.
