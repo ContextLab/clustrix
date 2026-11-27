@@ -69,7 +69,6 @@ from clustrix.loop_analysis import (
     SafeRangeEvaluator,
 )
 from clustrix.modern_notebook_widget import ModernClustrixWidget
-from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
 from clustrix.utils import (
     _distribution_import_names,
     _dumps_by_value,
@@ -815,112 +814,47 @@ def test_a_failed_environment_capture_is_reported(monkeypatch, caplog):
 # real code with a real broken input and asserts the outcome, not the source.
 
 
-def test_a_connectivity_probe_that_never_ran_is_not_reported_as_unreachable(caplog):
-    """ "Cannot reach that host" is a claim about somebody else's machine.
+def _press_test_connection(host, port):
+    """Drive the widget's real "Test connection" button for ``host:port``.
 
-    The widget's probe returned ``False`` both for a connection that was
-    refused and for a probe that never got as far as connecting -- an
-    unresolvable name, a port outside 0-65535 -- and the caller renders
-    ``False`` as "Cannot reach {host}:{port}. Check if the hostname/IP is
-    correct and accessible". For a DNS failure that is a confident, wrong
-    statement about a machine clustrix never managed to ask, and it sends the
-    user to check the wrong thing.
-
-    The trigger is real: ``.invalid`` is reserved by RFC 2606 precisely so
-    that it can never resolve, and ``connect_ex`` really raises
-    ``socket.gaierror`` for it.
+    Everything here is real: a real ``ModernClustrixWidget`` with real
+    ipywidgets controls, and ``_on_test_connect`` is the callback the button
+    is wired to, which opens a real connection through ``ClusterExecutor``.
+    The console is a real ``widgets.Output``, which outside a kernel passes
+    ``print`` straight through to stdout, so ``capsys`` sees exactly what a
+    user would. Returns the header pill, which is the other thing they see.
     """
-    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
-        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
-            None, "no-such-host.invalid", 22, timeout=2
-        )
-
-    assert reachable is None, (
-        "a probe that could not be run was reported as a host that could not "
-        "be reached"
-    )
-    assert reason, "the third value has to carry why, or the caller cannot say"
-    messages = [record.getMessage() for record in caplog.records]
-    assert any("no-such-host.invalid" in message for message in messages), messages
-    assert any(
-        "says nothing about whether the host is reachable" in message
-        for message in messages
-    ), messages
-
-
-def test_a_connection_that_was_really_refused_is_still_a_refusal(caplog):
-    """The honest answers are unchanged, or the test above is just noise.
-
-    Port 1 on the loopback interface is a real TCP connect that is really
-    refused: ``connect_ex`` returns ECONNREFUSED rather than raising.
-    """
-    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
-        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
-            None, "127.0.0.1", 1, timeout=2
-        )
-
-    assert reachable is False
-    assert reason
-    assert caplog.records == [], "a real measurement must not warn"
-
-
-def test_a_listening_socket_is_reported_as_reachable(server, caplog):
-    """...and so is the positive answer, against the real SSH server."""
-    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
-        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
-            None, server.host, server.port, timeout=5
-        )
-
-    assert (reachable, reason) == (True, "")
-    # The property is that the *widget* stayed silent. caplog captures every
-    # logger, and paramiko's server thread races a banner-warning into the
-    # record list on loaded runners -- the prober hangs up before the
-    # handshake finishes, which is the probe working.
-    widget_records = [
-        r for r in caplog.records if r.name == "clustrix.notebook_magic_widget"
-    ]
-    assert widget_records == [], [r.getMessage() for r in widget_records]
-
-
-def _press_test_config(host, port):
-    """Drive the widget's real "Test configuration" button for ``host:port``.
-
-    Everything here is real: a real ``EnhancedClusterConfigWidget`` with real
-    ipywidgets fields, and ``_on_test_config`` is the callback the button is
-    actually wired to. Leaving the username empty stops the run right after
-    the network probe, which is the step under test; ``status_output`` is a
-    real ``widgets.Output``, which outside a kernel passes ``print`` straight
-    through to stdout, so ``capsys`` sees exactly what a user would.
-    """
-    widget = EnhancedClusterConfigWidget()
-    widget.cluster_type.value = "ssh"
-    widget.host_field.value = host
-    widget.port_field.value = port
-    widget.username_field.value = ""
-    widget._on_test_config(None)
+    widget = ModernClustrixWidget()
+    widget.widgets["cluster_type"].value = "ssh"
+    widget.widgets["host"].value = host
+    widget.widgets["port"].value = port
+    widget.widgets["username"].value = "nobody"
+    widget._on_test_connect(None)
+    return widget.widgets["status_pill"].value
 
 
 def test_the_widget_does_not_tell_the_user_a_host_is_down_on_no_evidence(capsys):
-    """The tri-state is only worth having if the caller renders it.
+    """ "Cannot reach that host" is a claim about somebody else's machine.
 
-    The three tests above pin ``_test_remote_connectivity``'s return value,
-    and they are not enough: deleting the caller's ``if reachable is None:``
-    branch leaves all of them green and reproduces the headline defect
-    verbatim -- ``.invalid``, which RFC 2606 reserves so that it can never
-    resolve, comes back out of the widget as "Cannot reach
-    no-such-host.invalid:22 ... Check if the hostname/IP is correct and
-    accessible". The hostname is correct. Clustrix never managed to ask.
+    The widget this replaced probed with a bare socket and rendered every
+    failure -- a refused connection, but also a name that never resolved --
+    as "Cannot reach {host}:{port}. Check if the hostname/IP is correct and
+    accessible". For a DNS failure that is a confident, wrong statement about
+    a machine clustrix never managed to ask.
 
-    What the user reads is the product, so assert on what the user reads.
+    The trigger is real: ``.invalid`` is reserved by RFC 2606 precisely so
+    that it can never resolve. What the user reads is the product, so the
+    assertion is on what the user reads: the failure is named as a name
+    lookup, and nothing says a connection was refused.
     """
-    _press_test_config("no-such-host.invalid", 22)
+    pill = _press_test_connection("no-such-host.invalid", 22)
     printed = capsys.readouterr().out
 
-    assert "Could not tell whether no-such-host.invalid:22 is reachable" in printed
-    assert "NOT evidence that the host is down" in printed
-    assert "Cannot reach" not in printed, (
-        "the widget claimed a host was unreachable on the strength of a probe "
-        "that never ran"
+    assert "not connected" in pill
+    assert "Connection failed: gaierror" in printed, printed
+    assert "Unable to connect to port" not in printed, (
+        "the widget claimed a host refused a connection on the strength of a "
+        "name lookup that never resolved"
     )
 
 
@@ -930,14 +864,14 @@ def test_the_widget_still_reports_a_refusal_it_really_measured(capsys):
     Port 1 on the loopback interface is a real TCP connect that is really
     refused, so here the widget has measured the host and must say so plainly.
     """
-    _press_test_config("127.0.0.1", 1)
+    pill = _press_test_connection("127.0.0.1", 1)
     printed = capsys.readouterr().out
 
-    assert "Cannot reach 127.0.0.1:1" in printed
-    assert "Check if the hostname/IP is correct and accessible" in printed
-    assert "Could not tell whether" not in printed, (
-        "a refusal the probe really measured was downgraded to 'I could not "
-        "tell', which is the opposite failure and just as misleading"
+    assert "not connected" in pill
+    assert "Unable to connect to port 1 on 127.0.0.1" in printed, printed
+    assert "gaierror" not in printed, (
+        "a refusal the widget really measured was reported as a name lookup "
+        "failure, which sends the user to check the wrong thing"
     )
 
 
@@ -1095,46 +1029,6 @@ def test_a_transport_failure_is_not_reported_as_a_missing_interpreter(connection
         "a dead transport still produced the confident claim that the remote "
         "host has no matching interpreter: " + message
     )
-
-
-def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
-    tmp_path, monkeypatch, caplog
-):
-    """An empty overwrite list is a claim about the filesystem.
-
-    The widget offers "Overwrite: <file>" for every configuration file it can
-    find. When the scan itself raised, the list was emptied in silence, which
-    reads as "there is nothing here to overwrite" -- and the user is one click
-    from writing a new file beside the one they meant to replace.
-
-    The trigger is a real permission bit on a real directory, and it is the
-    *parent* that is closed rather than the configuration directory itself:
-    ``Path.exists()`` answers False for a path that is not there but
-    propagates EACCES for one it is not allowed to look for, and pathlib's
-    ``glob`` swallows ``PermissionError`` internally, so closing the
-    configuration directory itself would prove nothing.
-    """
-    outer = tmp_path / "outer"
-    config_dir = outer / "conf"
-    config_dir.mkdir(parents=True)
-    monkeypatch.setenv(CONFIG_DIR_ENV_VAR, str(config_dir))
-    monkeypatch.chdir(tmp_path)
-
-    widget = EnhancedClusterConfigWidget()
-    os.chmod(outer, 0o000)
-    try:
-        with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
-            widget._update_existing_files()
-    finally:
-        os.chmod(outer, 0o700)
-
-    assert widget.save_file_select.options == ("",) or list(
-        widget.save_file_select.options
-    ) == [""]
-    messages = [record.getMessage() for record in caplog.records]
-    assert any(
-        "not because there are no files" in message for message in messages
-    ), messages
 
 
 # ---------------------------------------------------------------------------
