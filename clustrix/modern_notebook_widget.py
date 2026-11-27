@@ -103,6 +103,14 @@ WIDGET_MANAGED_FIELDS = frozenset(
 )
 
 
+#: What an empty secret field says, and what it says once something has been
+#: entered and moved out of it.
+SECRET_PLACEHOLDERS = {
+    "password": "this session only, never saved",
+    "hf_token": "blank: HF_TOKEN or `hf auth login`",
+}
+SECRET_HELD = "entered; kept in memory only"
+
 #: Profile settings Apply never forwards to ``configure()``. Both weaken a
 #: check -- host-key verification, and which container image is handed the
 #: HuggingFace token -- and clustrix honours them only from a configuration
@@ -272,6 +280,12 @@ class ModernClustrixWidget:
         # Unapplied edits, per profile name, as _config_data_from_widgets
         # produced them. Held in memory only.
         self._drafts: Dict[str, Dict[str, Any]] = {}
+        #: What was typed into a secret field. It is moved here, and the
+        #: field emptied, as soon as the browser reports it: Jupyter can save
+        #: the form's state into the notebook file ("Save Widget State
+        #: Automatically"), and a password left in the field would be saved
+        #: with it, in plain text.
+        self._secrets: Dict[str, str] = {key: "" for key in SECRET_PLACEHOLDERS}
         # What the form read as just after the selected profile was loaded.
         self._baseline: Dict[str, Any] = {}
         # The refused connection whose host key the user is being asked
@@ -379,9 +393,7 @@ class ModernClustrixWidget:
         w["ssh_key_file"] = self._text(
             "SSH key file", "blank: ssh-agent and default keys", mono=True
         )
-        w["password"] = widgets.Password(
-            description="Password", placeholder="this session only, never saved"
-        )
+        w["password"] = self._secret_field("password", "Password")
         w["local_env_var"] = self._text(
             "…or the environment variable that holds the password",
             "MY_CLUSTER_PASSWORD",
@@ -407,9 +419,8 @@ class ModernClustrixWidget:
             description="Hardware", options=list(HF_FLAVORS), value=HF_FLAVORS[0]
         )
         w["hf_timeout"] = self._text("Time limit per job", "e.g. 30m, 2h")
-        w["hf_token"] = widgets.Password(
-            description="Token (this session only, never saved)",
-            placeholder="blank: HF_TOKEN or `hf auth login`",
+        w["hf_token"] = self._secret_field(
+            "hf_token", "Token (this session only, never saved)"
         )
         w["hf_allow_gpu"] = widgets.Checkbox(
             description="Allow GPU hardware, which is billed per second",
@@ -932,8 +943,8 @@ class ModernClustrixWidget:
         held = [
             label
             for label, value in (
-                ("the password", w["password"].value),
-                ("the token", w["hf_token"].value),
+                ("the password", self.secret("password")),
+                ("the token", self.secret("hf_token")),
                 ("environment variables", w["env_vars"].value.strip()),
             )
             if value
@@ -1497,12 +1508,42 @@ class ModernClustrixWidget:
             print(f"  returned  {result.get('answer')}  (expected 5050)")
             self.set_status("ok", "job completed")
 
+    def _secret_field(self, key: str, description: str) -> widgets.Password:
+        """A field whose content is held here and not in the form."""
+        field = widgets.Password(
+            description=description,
+            placeholder=SECRET_PLACEHOLDERS[key],
+            # One report when the field is left, not one per keystroke: the
+            # field is emptied on that report, which must not happen mid-word.
+            continuous_update=False,
+        )
+
+        def typed(change) -> None:
+            if change["new"]:
+                self._set_secret(key, change["new"])
+
+        field.observe(typed, names="value")
+        return field
+
+    def secret(self, key: str) -> str:
+        """The password or token entered for this session, or ``""``."""
+        return self._secrets[key]
+
+    def _set_secret(self, key: str, value: str) -> None:
+        self._secrets[key] = value
+        field = self.widgets.get(key)
+        if field is None:  # still being built
+            return
+        field.placeholder = SECRET_HELD if value else SECRET_PLACEHOLDERS[key]
+        if field.value:
+            field.value = ""
+
     def _on_auto_setup_ssh(self, button) -> None:
         """Generate an SSH key and install it on the host on screen."""
         with self._action("auto_setup_ssh", "Setting up…", "setting up key…"):
             if self._refuse_if_invalid("set up a key for"):
                 return
-            password = self.widgets["password"].value
+            password = self.secret("password")
             if not password:
                 self._mark_invalid(("password",))
                 print(
@@ -1540,7 +1581,7 @@ class ModernClustrixWidget:
             self._suspend_profile_capture = True
             try:
                 self.widgets["ssh_key_file"].value = result["key_path"]
-                self.widgets["password"].value = ""
+                self._set_secret("password", "")
             finally:
                 self._suspend_profile_capture = False
             if result["key_already_existed"]:
@@ -1801,7 +1842,7 @@ class ModernClustrixWidget:
             "cluster_host": text("host") or None,
             "cluster_port": w["port"].value,
             "username": text("username") or None,
-            "password": w["password"].value or None,
+            "password": self.secret("password") or None,
             "key_file": text("ssh_key_file") or None,
             "password_env_var": text("local_env_var"),
             # Naming the variable only takes effect if clustrix is also told
@@ -1812,7 +1853,7 @@ class ModernClustrixWidget:
             "hf_namespace": text("hf_namespace") or None,
             "hf_flavor": w["hf_flavor"].value,
             "hf_job_timeout": text("hf_timeout") or None,
-            "hf_token": w["hf_token"].value or None,
+            "hf_token": self.secret("hf_token") or None,
             "hf_allow_gpu_flavors": bool(w["hf_allow_gpu"].value),
             # Advanced
             "package_manager": w["package_manager"].value,
@@ -1866,7 +1907,7 @@ class ModernClustrixWidget:
         w["host"].value = data.get("cluster_host") or ""
         w["port"].value = number("cluster_port", defaults.cluster_port)
         w["username"].value = data.get("username") or ""
-        w["password"].value = data.get("password") or ""
+        self._set_secret("password", data.get("password") or "")
         # Empty, never a placeholder path: a key file that is set is tried
         # first, and a made-up one shadows the password.
         w["ssh_key_file"].value = data.get("key_file") or ""
@@ -1879,7 +1920,7 @@ class ModernClustrixWidget:
         w["hf_namespace"].value = data.get("hf_namespace") or ""
         set_choice(w["hf_flavor"], data.get("hf_flavor") or HF_FLAVORS[0])
         w["hf_timeout"].value = data.get("hf_job_timeout") or ""
-        w["hf_token"].value = data.get("hf_token") or ""
+        self._set_secret("hf_token", data.get("hf_token") or "")
         w["hf_allow_gpu"].value = bool(data.get("hf_allow_gpu_flavors"))
 
         # Advanced

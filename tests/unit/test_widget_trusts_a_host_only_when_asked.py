@@ -176,7 +176,7 @@ def test_key_setup_reports_a_wrong_password_as_not_connected(widget, server, cap
     assert "not connected" in _pill(widget)
     assert "Could not reach the host: AuthenticationException" in printed
     assert widget.widgets["ssh_key_file"].value == ""
-    assert widget.widgets["password"].value == "wrong"
+    assert widget.secret("password") == "wrong"
 
 
 def test_the_connection_layers_do_not_narrate_into_the_console(widget, server, capsys):

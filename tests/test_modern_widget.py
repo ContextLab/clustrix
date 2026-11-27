@@ -979,7 +979,7 @@ class TestExportingAndImportingAFile:
         assert second.widgets["profile_dropdown"].value == "HuggingFace Jobs (CPU)"
         assert second.widgets["hf_namespace"].value == "contextlab"
         assert second.widgets["hf_timeout"].value == "45m"
-        assert second.widgets["hf_token"].value == ""
+        assert second.secret("hf_token") == ""
         second.widgets["profile_dropdown"].value = "SLURM cluster"
         controls = second.widgets
         assert controls["host"].value == "hpc.example.edu"
@@ -1355,7 +1355,7 @@ class TestSetUpSSHKey:
         assert not (pathlib.Path(ssh_host.root) / ".ssh" / "authorized_keys").exists()
         assert list((pathlib.Path.home() / ".ssh").glob("id_*")) == []
         # The password is kept so the user can correct it.
-        assert widget.widgets["password"].value == "the-wrong-password"
+        assert widget.secret("password") == "the-wrong-password"
         button = widget.widgets["auto_setup_ssh"]
         assert (button.description, button.disabled) == ("Set up SSH key", False)
 
@@ -1399,3 +1399,41 @@ class TestSetUpSSHKey:
         ssh_host.authentications.clear()
         _click(widget, "test_connect_btn", capsys)
         assert ssh_host.authentications == [("tester", "publickey")]
+
+
+class TestSecretsAreNotLeftInTheForm:
+    """Jupyter can save a form's state into the notebook file. Whatever is
+    in a field at that moment is written there in plain text, so a password
+    or token is moved out of its field as soon as it arrives."""
+
+    @pytest.mark.parametrize("key", ["password", "hf_token"])
+    def test_a_typed_secret_is_held_in_memory_and_the_field_emptied(self, key):
+        from clustrix.modern_notebook_widget import SECRET_HELD, SECRET_PLACEHOLDERS
+
+        widget = ModernClustrixWidget()
+        field = widget.widgets[key]
+        assert field.placeholder == SECRET_PLACEHOLDERS[key]
+
+        field.value = "typed-by-the-user"
+
+        assert field.value == ""
+        assert field.get_state()["value"] == ""
+        assert widget.secret(key) == "typed-by-the-user"
+        assert field.placeholder == SECRET_HELD
+        assert widget._config_data_from_widgets()[key] == "typed-by-the-user"
+
+    def test_typing_again_replaces_what_was_held(self):
+        widget = ModernClustrixWidget()
+        widget.widgets["password"].value = "first"
+        widget.widgets["password"].value = "second"
+
+        assert widget.secret("password") == "second"
+
+    def test_nothing_secret_is_in_the_state_jupyter_would_save(self):
+        widget = ModernClustrixWidget()
+        widget.widgets["password"].value = "typed-by-the-user"
+        widget.widgets["hf_token"].value = "hf_typed-by-the-user"
+
+        saved = repr([control.get_state() for control in widget.widgets.values()])
+
+        assert "typed-by-the-user" not in saved

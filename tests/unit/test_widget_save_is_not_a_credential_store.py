@@ -200,11 +200,11 @@ class TestWhatSurvives:
 
         _save(widget, tmp_path / "bundle.yml", capsys)
 
-        assert widget.widgets["hf_token"].value == SENTINELS["hf_token"]
+        assert widget.secret("hf_token") == SENTINELS["hf_token"]
         widget.widgets["profile_dropdown"].value = "SLURM cluster"
-        assert widget.widgets["password"].value == SENTINELS["draft_password"]
+        assert widget.secret("password") == SENTINELS["draft_password"]
         widget.widgets["profile_dropdown"].value = "SSH remote machine"
-        assert widget.widgets["password"].value == SENTINELS["password"]
+        assert widget.secret("password") == SENTINELS["password"]
         assert SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"] in (
             widget.widgets["env_vars"].value
         )
