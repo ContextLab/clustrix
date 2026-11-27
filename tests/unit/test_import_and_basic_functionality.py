@@ -11,7 +11,6 @@ from clustrix.utils import (
     serialize_function,
     deserialize_function,
     get_environment_info,
-    detect_loops,
 )
 
 
@@ -74,21 +73,6 @@ def test_serialize_function():
     serialized = serialize_function(sample_function, (5, 3), {})
     assert isinstance(serialized, dict)
     assert "function" in serialized  # Key is 'function', not 'function_data'
-
-
-def test_detect_loops():
-    """Test loop detection functionality."""
-
-    def function_with_loop():
-        results = []
-        for i in range(10):
-            results.append(i * 2)
-        return results
-
-    # Should be able to detect loops
-    loop_info = detect_loops(function_with_loop, (), {})
-    # Function should complete without errors
-    assert loop_info is not None or loop_info is None  # Either result is fine
 
 
 def test_environment_info():

@@ -10,7 +10,7 @@ import inspect
 import os
 import types
 import textwrap
-from typing import List, Dict, Set, Optional, Callable, Any
+from typing import List, Set, Optional, Callable
 from pathlib import Path
 
 
@@ -400,145 +400,6 @@ class DependencyAnalyzer:
                 pass
 
 
-class LoopAnalyzer:
-    """Analyzes loops in functions to identify parallelization opportunities."""
-
-    def __init__(self):
-        self.parallelizable_patterns = {
-            "for_loop_with_list_comprehension",
-            "for_loop_with_independent_iterations",
-            "map_like_operations",
-        }
-
-    def analyze_loops(self, tree: ast.AST) -> List[Dict[str, Any]]:
-        """
-        Analyze loops in the AST to identify parallelization opportunities.
-
-        Returns:
-            List of loop analysis results
-        """
-        loops = []
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.For):
-                loop_info = self._analyze_for_loop(node)
-                loops.append(loop_info)
-            elif isinstance(node, ast.While):
-                loop_info = self._analyze_while_loop(node)
-                loops.append(loop_info)
-
-        return loops
-
-    def _analyze_for_loop(self, node: ast.For) -> Dict[str, Any]:
-        """Analyze a for loop for parallelization potential."""
-        # Use ast.unparse if available (Python 3.9+), otherwise use a simple fallback
-        if hasattr(ast, "unparse"):
-            target_str = ast.unparse(node.target)
-            iter_str = ast.unparse(node.iter)
-        else:
-            target_str = getattr(node.target, "id", str(node.target))
-            # For Python < 3.9, handle common iterator patterns
-            if isinstance(node.iter, ast.Call):
-                if hasattr(node.iter.func, "id"):
-                    # Handle range(), list(), etc.
-                    func_name = node.iter.func.id
-                    args = []
-                    for arg in node.iter.args:
-                        if isinstance(arg, ast.Constant):
-                            args.append(str(arg.value))
-                        else:
-                            args.append("...")
-                    iter_str = f"{func_name}({', '.join(args)})"
-                else:
-                    iter_str = str(node.iter)
-            elif isinstance(node.iter, ast.Name):
-                iter_str = node.iter.id
-            else:
-                iter_str = str(node.iter)
-
-        return {
-            "type": "for",
-            "lineno": node.lineno,
-            "target": target_str,
-            "iter": iter_str,
-            "is_parallelizable": self._is_loop_parallelizable(node),
-            "dependencies": self._find_loop_dependencies(node),
-        }
-
-    def _analyze_while_loop(self, node: ast.While) -> Dict[str, Any]:
-        """Analyze a while loop for parallelization potential."""
-        # Use ast.unparse if available (Python 3.9+), otherwise use a simple fallback
-        if hasattr(ast, "unparse"):
-            test_str = ast.unparse(node.test)
-        else:
-            test_str = str(node.test)
-
-        return {
-            "type": "while",
-            "lineno": node.lineno,
-            "test": test_str,
-            "is_parallelizable": False,  # While loops are generally not parallelizable
-            "dependencies": [],
-        }
-
-    def _is_loop_parallelizable(self, node: ast.For) -> bool:
-        """
-        Determine if a for loop can be parallelized.
-
-        A loop is potentially parallelizable if:
-        1. Each iteration is independent
-        2. No shared mutable state
-        3. No break/continue statements that depend on previous iterations
-        """
-        # Simple heuristic: check for common non-parallelizable patterns
-        for child in ast.walk(node):
-            # Break/continue make parallelization complex
-            if isinstance(child, (ast.Break, ast.Continue)):
-                return False
-
-            # Global variable modifications can create dependencies
-            if isinstance(child, ast.Global):
-                return False
-
-        # Criterion 2 ("no shared mutable state") was documented but never
-        # actually checked: a body that reads/mutates an outer accumulator
-        # (`total += i`) or a shared container (`results.append(x)`) passed
-        # every earlier check and came back is_parallelizable=True. Reuse
-        # loop_analysis.DependencyAnalyzer -- the same real dependency
-        # analysis clustrix/decorator.py relies on for its own
-        # parallelization decision -- instead of duplicating that logic
-        # here with a second, weaker implementation. Aliased on import: this
-        # module already defines its own unrelated `DependencyAnalyzer`
-        # (import/file/filesystem-call analysis) and the two must not be
-        # confused for one another.
-        from .loop_analysis import DependencyAnalyzer as LoopDependencyAnalyzer
-
-        variable = node.target.id if isinstance(node.target, ast.Name) else None
-        dep_analyzer = LoopDependencyAnalyzer()
-        dep_analyzer.loop_var = variable
-        for stmt in node.body:
-            dep_analyzer.visit(stmt)
-
-        if dep_analyzer.has_loop_carried_dependencies():
-            return False
-
-        external_reads = dep_analyzer.reads - ({variable} if variable else set())
-        if external_reads:
-            return False
-
-        return True
-
-    def _find_loop_dependencies(self, node: ast.For) -> List[str]:
-        """Find variables that the loop depends on."""
-        dependencies = []
-
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
-                dependencies.append(child.id)
-
-        return list(set(dependencies))  # Remove duplicates
-
-
 def analyze_function_dependencies(func: Callable) -> DependencyGraph:
     """
     Convenience function to analyze a function's dependencies.
@@ -551,24 +412,3 @@ def analyze_function_dependencies(func: Callable) -> DependencyGraph:
     """
     analyzer = DependencyAnalyzer()
     return analyzer.analyze_function(func)
-
-
-def analyze_function_loops(func: Callable) -> List[Dict[str, Any]]:
-    """
-    Convenience function to analyze loops in a function.
-
-    Args:
-        func: The function to analyze
-
-    Returns:
-        List of loop analysis results
-    """
-    try:
-        source = inspect.getsource(func)
-        # Remove common leading whitespace to handle indented functions
-        dedented_source = textwrap.dedent(source)
-        tree = ast.parse(dedented_source)
-        analyzer = LoopAnalyzer()
-        return analyzer.analyze_loops(tree)
-    except (OSError, SyntaxError) as e:
-        raise ValueError(f"Cannot analyze function {func.__name__}: {e}")

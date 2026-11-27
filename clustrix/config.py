@@ -48,8 +48,8 @@ DEAD_BUT_ACCEPTED_FIELDS: Dict[str, str] = {
         "nothing divides GPU memory; the fan-out that used to was deleted"
     ),
     "local_parallel_threshold": (
-        "local parallelism is decided by picklability and I/O markers, not "
-        "by an iteration threshold"
+        "a loop is divided among local workers when timing its first "
+        "iteration shows that is worth doing, not by an iteration threshold"
     ),
     "auto_gpu_packages": "nothing auto-installs CUDA packages any more",
     "prefer_gpu_execution": (

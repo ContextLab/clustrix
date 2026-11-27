@@ -7,7 +7,6 @@ from clustrix.utils import (
     deserialize_function,
     get_environment_requirements,
     get_unreproducible_requirements,
-    detect_loops,
     create_job_script,
     setup_remote_environment,
     setup_environment,
@@ -15,7 +14,6 @@ from clustrix.utils import (
     is_conda_available,
     get_package_manager_command,
 )
-from clustrix.loop_analysis import detect_loops_in_function
 from clustrix.config import ClusterConfig
 
 
@@ -155,86 +153,6 @@ class TestEnvironmentInfo:
         for package, version in requirements.items():
             assert isinstance(package, str)
             assert isinstance(version, str)
-
-
-class TestLoopDetection:
-    """Test loop detection functionality."""
-
-    def test_detect_loops_for_loop(self):
-        """Test detection of for loops."""
-        # Use a function from the sample fixtures that has source available
-        loops = detect_loops_in_function(self._create_sample_loop_function)
-        assert isinstance(loops, list)
-        # Loop detection might not work for dynamically created functions
-        # This is acceptable behavior
-
-    def _create_sample_loop_function(self):
-        """Sample function with a loop for testing."""
-        results = []
-        for i in range(10):
-            results.append(i * 2)
-        return results
-
-    def test_detect_loops_while_loop(self):
-        """Test detection of while loops."""
-        loops = detect_loops_in_function(self._create_sample_while_function)
-        assert isinstance(loops, list)
-        # Loop detection might not work for dynamically created functions
-
-    def _create_sample_while_function(self):
-        """Sample function with a while loop for testing."""
-        i = 0
-        while i < 10:
-            i += 1
-        return i
-
-    def test_detect_loops_nested(self):
-        """Test detection of nested loops."""
-        loops = detect_loops_in_function(self._create_sample_nested_function)
-        assert isinstance(loops, list)
-        # Nested loop detection might not work perfectly with dynamically created functions
-
-    def _create_sample_nested_function(self):
-        """Sample function with nested loops for testing."""
-        results = []
-        for i in range(5):
-            for j in range(3):
-                results.append(i * j)
-        return results
-
-    def test_detect_loops_no_loops(self):
-        """Test function with no loops."""
-        loops = detect_loops_in_function(self._create_simple_function)
-        assert isinstance(loops, list)
-        assert len(loops) == 0
-
-    def _create_simple_function(self, x=1, y=2):
-        """Simple function with no loops."""
-        return x + y
-
-    def test_detect_loops_legacy_with_range(self):
-        """Test the legacy detect_loops function with range loop."""
-        result = detect_loops(self._create_range_function, (), {})
-
-        # Legacy function may return None due to source code detection issues
-        assert result is None or isinstance(result, dict)
-
-    def _create_range_function(self):
-        """Function with range-based loop."""
-        for i in range(5):
-            pass
-
-    def test_detect_loops_legacy_no_range(self):
-        """Test legacy detect_loops with non-range loop."""
-        result = detect_loops(self._create_list_function, (), {})
-        # Might return None for non-range loops
-        assert result is None or isinstance(result, dict)
-
-    def _create_list_function(self):
-        """Function with list-based loop."""
-        items = [1, 2, 3, 4, 5]
-        for item in items:
-            pass
 
 
 class TestScriptGeneration:
@@ -588,60 +506,6 @@ class TestSerializationEdgeCases:
         """Test deserialize_function with invalid format raises ValueError."""
         with pytest.raises(ValueError, match="Invalid function data format"):
             deserialize_function("invalid_string_format")
-
-
-class TestLoopDetectionEdgeCases:
-    """Test edge cases in loop detection functionality."""
-
-    def test_detect_loops_range_extraction_error(self):
-        """Test loop detection when range extraction fails."""
-
-        def test_func():
-            for i in range(10):
-                pass
-
-        # Mock eval to raise an exception during range parsing
-        with patch("builtins.eval", side_effect=Exception("Eval failed")):
-            result = detect_loops(test_func, (), {})
-            # When eval fails, it should still detect the loop but use fallback range
-            if result is not None:
-                assert result["type"] == "for"
-                assert result["variable"] == "i"
-                # Should fallback to default range when eval fails
-                assert result["range"] == range(10)
-
-    def test_detect_loops_inspection_failure(self):
-        """Test detect_loops when source inspection fails."""
-
-        def test_func():
-            for i in range(5):
-                pass
-
-        with patch("inspect.getsource", side_effect=Exception("No source")):
-            result = detect_loops(test_func, (), {})
-            assert result is None
-
-    def test_detect_loops_ast_parse_failure(self):
-        """Test detect_loops when AST parsing fails."""
-
-        def test_func():
-            for i in range(5):
-                pass
-
-        with patch("ast.parse", side_effect=SyntaxError("Bad syntax")):
-            result = detect_loops(test_func, (), {})
-            assert result is None
-
-    def test_detect_loops_for_loop_no_range(self):
-        """Test detection of for loops without range."""
-
-        def test_func():
-            for item in [1, 2, 3]:
-                print(item)
-
-        result = detect_loops(test_func, (), {})
-        # Should return None since it doesn't contain range()
-        assert result is None
 
 
 class TestRemoteEnvironmentSetup:

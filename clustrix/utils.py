@@ -1,4 +1,3 @@
-import ast
 import collections
 import hashlib
 import hmac
@@ -10,7 +9,6 @@ import re
 import shlex
 import threading
 import sys
-import textwrap
 import pickle
 import pickletools
 import inspect
@@ -460,141 +458,6 @@ def validate_env_var_name(name: str) -> str:
             "underscore and contain only letters, digits and underscores."
         )
     return str(name)
-
-
-def _evaluate_literal_range(range_expression: str):
-    """Evaluate a ``range(...)`` expression, but only from literal arguments.
-
-    The previous implementation called ``eval()`` on text sliced out of the
-    user's source, with a comment admitting it was dangerous. It also could not
-    tell "this range is range(0, 10)" from "I could not work this out", because
-    failure fell through to a hardcoded ``range(10)``.
-
-    Returns the range when every argument is a literal integer, and ``None``
-    when the expression depends on anything only known at run time (a variable,
-    ``len(data)``, an attribute). ``None`` means "do not parallelize", never
-    "assume ten".
-    """
-    tree = ast.parse(range_expression, mode="eval")
-    call = tree.body
-    if not isinstance(call, ast.Call):
-        return None
-    if not isinstance(call.func, ast.Name) or call.func.id != "range":
-        return None
-    if call.keywords:
-        return None
-
-    bounds = []
-    for argument in call.args:
-        value = ast.literal_eval(argument)
-        if not isinstance(value, int) or isinstance(value, bool):
-            return None
-        bounds.append(value)
-    if not 1 <= len(bounds) <= 3:
-        return None
-    return range(*bounds)
-
-
-def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
-    """
-    Analyze function to detect parallelizable loops.
-
-    Args:
-        func: Function to analyze
-        args: Function arguments
-        kwargs: Function keyword arguments
-
-    Returns:
-        Dictionary with loop information or None if no loops detected
-    """
-
-    try:
-        # Dedented: getsource() returns a nested function or a method with
-        # the indentation it has in the file, which ast.parse() refuses.
-        source = textwrap.dedent(inspect.getsource(func))
-        tree = ast.parse(source)
-
-        class LoopVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.loops = []
-
-            def visit_For(self, node):
-                # Analyze for loops
-                if isinstance(node.target, ast.Name):
-                    loop_info = {
-                        "type": "for",
-                        "variable": node.target.id,
-                        "iterable": (
-                            ast.unparse(node.iter)
-                            if hasattr(ast, "unparse")
-                            else "unknown"
-                        ),
-                    }
-                    self.loops.append(loop_info)
-                self.generic_visit(node)
-
-            def visit_While(self, node):
-                # Analyze while loops
-                loop_info = {
-                    "type": "while",
-                    "condition": (
-                        ast.unparse(node.test) if hasattr(ast, "unparse") else "unknown"
-                    ),
-                }
-                self.loops.append(loop_info)
-                self.generic_visit(node)
-
-        visitor = LoopVisitor()
-        visitor.visit(tree)
-
-        if visitor.loops:
-            # Return info about the first loop for now
-            # In practice, you'd want more sophisticated analysis
-            loop = visitor.loops[0]
-            if loop["type"] == "for" and "range(" in loop["iterable"]:
-                # The range has to be known exactly, because it decides how the
-                # work is split. Guessing it silently changes the answer: the
-                # previous fallback here substituted range(10), so a loop over
-                # range(1000) whose bounds could not be read was chunked as ten
-                # iterations and the caller got a tenth of the work back with no
-                # error. If the range cannot be determined, refuse to
-                # parallelize -- running the loop whole is always correct.
-                range_str = loop["iterable"]
-                start = range_str.find("range(")
-                end = range_str.find(")", start)
-                if start == -1 or end == -1:
-                    return None
-                range_part = range_str[start : end + 1]
-                try:
-                    range_obj = _evaluate_literal_range(range_part)
-                except Exception:
-                    logger.info(
-                        "Not parallelizing this loop: its range %r could not be "
-                        "evaluated without running the function.",
-                        range_part,
-                    )
-                    return None
-                if range_obj is None:
-                    return None
-                loop["range"] = range_obj
-
-                return loop
-
-        return None
-
-    except Exception as exc:
-        # None means "no parallelizable loop", and running the loop whole is
-        # always correct, so the caller can still produce a correct result --
-        # it just produces it sequentially. That makes this log-and-continue
-        # rather than raise. What it is not is free: the user asked for
-        # parallelism and did not get it, and with the reason discarded there
-        # was nothing anywhere to explain why.
-        logger.warning(
-            "Loop analysis of %s failed (%s); running any loops in it " "sequentially.",
-            getattr(func, "__name__", func),
-            exc,
-        )
-        return None
 
 
 def make_portable_function(source: str, name: str) -> Callable:

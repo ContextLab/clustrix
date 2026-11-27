@@ -12,13 +12,11 @@ import pytest
 from clustrix.dependency_analysis import (
     DependencyAnalyzer,
     DependencyGraph,
-    LoopAnalyzer,
     FilesystemCall,
     ImportInfo,
     LocalFunctionCall,
     FileReference,
     analyze_function_dependencies,
-    analyze_function_loops,
 )
 
 
@@ -176,121 +174,6 @@ class TestDependencyAnalyzer:
         assert "data.txt" in deps.data_files
 
 
-class TestLoopAnalyzer:
-    """Test the LoopAnalyzer class."""
-
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.analyzer = LoopAnalyzer()
-
-    def test_analyze_for_loop(self):
-        """Test analysis of for loops."""
-        source = """
-def func_with_loops():
-    for i in range(10):
-        print(i)
-    
-    for item in items:
-        process(item)
-"""
-        tree = ast.parse(source)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 2
-
-        # Check first loop
-        loop1 = loops[0]
-        assert loop1["type"] == "for"
-        assert "i" in loop1["target"]
-        assert "range(10)" in loop1["iter"]
-
-        # Check second loop
-        loop2 = loops[1]
-        assert loop2["type"] == "for"
-        assert "item" in loop2["target"]
-        assert "items" in loop2["iter"]
-
-    def test_analyze_while_loop(self):
-        """Test analysis of while loops."""
-        source = """
-def func_with_while():
-    while condition:
-        do_something()
-"""
-        tree = ast.parse(source)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 1
-        loop = loops[0]
-        assert loop["type"] == "while"
-        assert not loop["is_parallelizable"]  # While loops not parallelizable
-
-    def test_loop_parallelizability(self):
-        """Test detection of non-parallelizable loops."""
-        # Loop with break statement
-        source_with_break = """
-def func_with_break():
-    for i in range(10):
-        if i == 5:
-            break
-        print(i)
-"""
-        tree = ast.parse(source_with_break)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 1
-        assert not loops[0]["is_parallelizable"]  # Has break statement
-
-        # Simple loop without breaks, and without reading anything but its
-        # own loop variable (no shared state, no calls to other names)
-        source_simple = """
-def func_simple():
-    for i in range(10):
-        x = i * 2
-"""
-        tree = ast.parse(source_simple)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 1
-        assert loops[0]["is_parallelizable"]  # Simple loop
-
-    def test_loop_calling_named_function_is_conservatively_flagged(self):
-        """`print(i)` reads the name `print` (the Call node's own `func`
-        child, not just its arguments), which _is_loop_parallelizable can't
-        distinguish from reading a real shared variable. This is the same
-        conservative-but-safe behaviour as clustrix.loop_analysis's
-        DependencyAnalyzer, which LoopAnalyzer now reuses: it can reject a
-        loop that would actually have been fine, but it will not approve
-        one that turns out to mutate shared state. See #106."""
-        source = """
-def func_with_call():
-    for i in range(10):
-        print(i)
-"""
-        tree = ast.parse(source)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 1
-        assert not loops[0]["is_parallelizable"]
-
-    def test_loop_with_reduction_accumulator_is_not_parallelizable(self):
-        """`total += i` reads and writes `total` across iterations -- a real
-        loop-carried dependency that the previous break/continue/global-only
-        heuristic did not check for at all (despite claiming to check for
-        "shared mutable state")."""
-        source = """
-def func_with_accumulator():
-    total = 0
-    for i in range(10):
-        total += i
-"""
-        tree = ast.parse(source)
-        loops = self.analyzer.analyze_loops(tree)
-
-        assert len(loops) == 1
-        assert not loops[0]["is_parallelizable"]
-
-
 class TestConvenienceFunctions:
     """Test convenience functions."""
 
@@ -307,19 +190,6 @@ class TestConvenienceFunctions:
         assert isinstance(deps, DependencyGraph)
         assert deps.function_name == "test_func"
         assert len(deps.imports) == 1
-
-    def test_analyze_function_loops(self):
-        """Test the convenience function for loop analysis."""
-
-        def test_func():
-            for i in range(10):
-                print(i)
-
-        loops = analyze_function_loops(test_func)
-
-        assert isinstance(loops, list)
-        assert len(loops) == 1
-        assert loops[0]["type"] == "for"
 
 
 class TestEdgeCases:
