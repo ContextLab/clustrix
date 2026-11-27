@@ -1,14 +1,17 @@
 import inspect
+import logging
 import pytest
 import pickle
-from unittest.mock import patch, Mock, MagicMock
+from concurrent.futures import ThreadPoolExecutor
+
+import dill
+
 from clustrix.utils import (
     serialize_function,
     deserialize_function,
     get_environment_requirements,
     get_unreproducible_requirements,
     create_job_script,
-    setup_remote_environment,
     setup_environment,
     is_uv_available,
     is_conda_available,
@@ -68,30 +71,57 @@ class TestSerialization:
         expected = 15
         assert result_func(*args, **kwargs) == expected
 
-    @patch("clustrix.utils.dill.dumps")
-    @patch("clustrix.utils.cloudpickle.dumps")
-    def test_fallback_to_dill(self, mock_cloudpickle, mock_dill):
-        """Test fallback to cloudpickle when dill fails."""
-        mock_dill.side_effect = Exception("Dill failed")
-        # A real pickle, not arbitrary bytes: the payload is read back to
-        # find the modules it will import on the worker, and what a
-        # serializer returns is always a pickle.
-        cloudpickle_data = pickle.dumps("cloudpickle_data", protocol=4)
-        mock_cloudpickle.return_value = cloudpickle_data
+    def test_an_enum_from_a_script_is_serialized_by_cloudpickle_when_dill_cannot(
+        self, caplog
+    ):
+        """The cascade really degrades: dill refuses, cloudpickle carries it.
 
-        def test_func():
-            return "test"
+        This replaces a test that patched ``dill.dumps`` to raise and
+        ``cloudpickle.dumps`` to return a canned pickle of a string, then
+        asserted the canned bytes came back. No serializer ran, so it could
+        not tell a working fallback from one that shipped garbage.
 
-        result = serialize_function(test_func, (), {})
+        The real disagreement needs no patching. An ``Enum`` defined in a
+        script lives in ``__main__``; dill tries to store its class by name,
+        cannot find ``__main__.Colour`` and refuses, with and without
+        ``recurse``. cloudpickle stores the class by value. The namespace
+        below is what a user's script looks like to the serializers.
+        """
+        script: dict = {"__name__": "__main__"}
+        exec(
+            "import enum\n"
+            "class Colour(enum.Enum):\n"
+            "    RED = 1\n"
+            "    GREEN = 2\n"
+            "def name_of(colour, shout=False):\n"
+            "    return colour.name.upper() if shout else colour.name.lower()\n",
+            script,
+        )
+        colour = script["Colour"].GREEN
 
-        # All three payloads must fall through to cloudpickle, not just the
-        # function: args and kwargs are serialized by the same helper.
-        assert result["function"] == cloudpickle_data
-        assert result["args"] == cloudpickle_data
-        assert result["kwargs"] == cloudpickle_data
-        # dill is tried first for anything not carrying project-local code.
-        assert mock_dill.called
-        assert mock_cloudpickle.called
+        # The premise. If a later dill learns to do this, the test must say
+        # so rather than pass without ever leaving the first strategy.
+        with pytest.raises(Exception):
+            dill.dumps(colour, protocol=4, recurse=True)
+        with pytest.raises(Exception):
+            dill.dumps(colour, protocol=4)
+
+        with caplog.at_level(logging.DEBUG, logger="clustrix.utils"):
+            serialized = serialize_function(
+                script["name_of"], (colour,), {"shout": True}
+            )
+
+        tried = [record.getMessage() for record in caplog.records]
+        for strategy in ("dill(recurse=True)", "dill"):
+            assert any(
+                f"Serializing by value with {strategy} failed" in line for line in tried
+            ), f"{strategy} was never tried and refused: {tried}"
+
+        # What came out is a payload a worker can use, not merely bytes.
+        restored, args, kwargs = deserialize_function(serialized)
+        assert args[0].name == "GREEN" and args[0].value == 2
+        assert kwargs == {"shout": True}
+        assert restored(*args, **kwargs) == "GREEN"
 
 
 class TestEnvironmentInfo:
@@ -236,190 +266,125 @@ class TestScriptGeneration:
             create_job_script("invalid_type", {}, "/tmp/job", config)
 
 
-class TestRemoteEnvironment:
-    """Test remote environment setup."""
+def _executable(directory, name, body):
+    """A real program called ``name`` in ``directory``, for a real ``PATH``."""
+    path = directory / name
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return path
 
-    def test_setup_remote_environment(self):
-        """Test remote environment setup."""
-        from unittest.mock import MagicMock
 
-        mock_ssh = Mock()
-        mock_sftp = Mock()
+@pytest.fixture
+def path_dir(tmp_path, monkeypatch):
+    """A directory that is the whole of this process's ``PATH``.
 
-        # Mock the SFTP context manager properly
-        mock_file = MagicMock()
-        mock_sftp.open.return_value = mock_file
-        mock_ssh.open_sftp.return_value = mock_sftp
+    ``is_uv_available`` and ``is_conda_available`` answer by running the
+    tool. Whether a tool is "installed" is therefore a fact about ``PATH``,
+    and the tests arrange that fact for real -- a program in the directory, or
+    none -- instead of replacing ``subprocess.run`` with a ``Mock`` that says
+    what the test wants to hear. The directory starts empty, so whatever the
+    developer's machine happens to have installed cannot leak in.
+    """
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    monkeypatch.setenv("PATH", str(directory))
+    return directory
 
-        # Mock exec_command return values
-        mock_stdin = Mock()
-        mock_stdout = Mock()
-        mock_stderr = Mock()
 
-        # Mock the channel and exit status
-        mock_channel = Mock()
-        mock_channel.recv_exit_status.return_value = 0  # Success
-        mock_stdout.channel = mock_channel
-
-        mock_ssh.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
-
-        requirements = {"numpy": "1.21.0", "pandas": "1.3.0"}
-        config = ClusterConfig(package_manager="pip")
-
-        # This should not raise an error
-        result = setup_remote_environment(mock_ssh, "/tmp/test", requirements, config)
-
-        # Verify SSH commands were executed
-        assert mock_ssh.exec_command.called
-        # Verify return value
-        assert result == "Environment setup completed successfully"
+AVAILABILITY_CHECKS = [("uv", is_uv_available), ("conda", is_conda_available)]
 
 
 class TestPackageManager:
-    """Test package manager utilities for uv support."""
+    """Which package manager is on this machine, and which one gets used."""
 
-    @patch("clustrix.utils.subprocess.run")
-    def test_is_uv_available_true(self, mock_run):
-        """Test uv availability check when uv is available."""
-        mock_run.return_value = Mock(returncode=0)
+    @pytest.mark.parametrize("tool, is_available", AVAILABILITY_CHECKS)
+    def test_a_tool_that_runs_is_available(self, path_dir, tool, is_available):
+        _executable(path_dir, tool, f'[ "$1" = --version ] && echo "{tool} 1.2.3"')
 
-        from clustrix.utils import is_uv_available
+        assert is_available() is True
 
-        assert is_uv_available() is True
+    @pytest.mark.parametrize("tool, is_available", AVAILABILITY_CHECKS)
+    def test_a_tool_that_is_not_on_the_path_is_not_available(
+        self, path_dir, tool, is_available
+    ):
+        assert is_available() is False
 
-        mock_run.assert_called_once_with(
-            ["uv", "--version"], capture_output=True, text=True, timeout=10
+    @pytest.mark.parametrize("tool, is_available", AVAILABILITY_CHECKS)
+    def test_a_tool_that_exits_with_an_error_is_not_available(
+        self, path_dir, tool, is_available
+    ):
+        """A broken install is on ``PATH`` and still cannot be used."""
+        _executable(path_dir, tool, "echo broken >&2; exit 3")
+
+        assert is_available() is False
+
+    @pytest.mark.parametrize("tool, is_available", AVAILABILITY_CHECKS)
+    def test_the_other_tool_being_installed_does_not_count(
+        self, path_dir, tool, is_available
+    ):
+        other = "conda" if tool == "uv" else "uv"
+        _executable(path_dir, other, "exit 0")
+
+        assert is_available() is False
+
+    @pytest.mark.timeout(60)
+    def test_a_tool_that_hangs_is_not_available_and_the_check_returns(self, path_dir):
+        """Each check gives the tool ten seconds, then answers no.
+
+        The programs really hang -- they sleep for five minutes -- so the
+        only way these calls return is the timeout killing them. The two
+        checks run side by side so the suite waits ten seconds, not twenty.
+        """
+        for tool, _ in AVAILABILITY_CHECKS:
+            _executable(path_dir, tool, "exec /bin/sleep 300")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            answers = [pool.submit(check) for _, check in AVAILABILITY_CHECKS]
+            assert [answer.result(timeout=45) for answer in answers] == [False, False]
+
+    @pytest.mark.parametrize(
+        "named, command", [("uv", "uv pip"), ("conda", "conda"), ("pip", "pip")]
+    )
+    def test_a_named_package_manager_is_used_without_looking_for_it(
+        self, path_dir, named, command
+    ):
+        """Naming one is an instruction, not a preference to be checked.
+
+        ``PATH`` is empty, so nothing is installed here; the answer is still
+        the one that was named. (The old test asserted that a ``Mock`` of
+        ``is_uv_available`` had not been called.)
+        """
+        assert get_package_manager_command(ClusterConfig(package_manager=named)) == (
+            command
         )
 
-    @patch("clustrix.utils.subprocess.run")
-    def test_is_uv_available_false(self, mock_run):
-        """Test uv availability check when uv is not available."""
-        mock_run.side_effect = FileNotFoundError()
+    @pytest.mark.parametrize(
+        "installed, command",
+        [
+            (("uv",), "uv pip"),
+            (("conda",), "conda"),
+            (("uv", "conda"), "uv pip"),
+            ((), "pip"),
+        ],
+        ids=["only-uv", "only-conda", "uv-beats-conda", "neither-so-pip"],
+    )
+    def test_auto_prefers_uv_then_conda_then_pip(self, path_dir, installed, command):
+        for tool in installed:
+            _executable(path_dir, tool, "exit 0")
 
-        from clustrix.utils import is_uv_available
-
-        assert is_uv_available() is False
-
-    def test_get_package_manager_command_pip(self):
-        """Test package manager command selection for pip."""
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="pip")
-
-        result = get_package_manager_command(config)
-        assert result == "pip"
-
-    def test_get_package_manager_command_uv(self):
-        """Test package manager command selection for uv."""
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="uv")
-
-        result = get_package_manager_command(config)
-        assert result == "uv pip"
-
-    @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_auto_uv_available(self, mock_uv_available):
-        """Test auto package manager selection when uv is available."""
-        mock_uv_available.return_value = True
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-        assert result == "uv pip"
-
-    @patch("clustrix.utils.is_uv_available")
-    @patch("clustrix.utils.is_conda_available")
-    def test_get_package_manager_command_auto_uv_unavailable(
-        self, mock_conda_available, mock_uv_available
-    ):
-        """Test auto package manager selection when uv is not available."""
-        mock_uv_available.return_value = False
-        mock_conda_available.return_value = (
-            False  # Also mock conda as unavailable to get pip
-        )
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-        assert result == "pip"
-
-    @patch("subprocess.run")
-    def test_is_conda_available_true(self, mock_run):
-        """Test conda availability check when conda is available."""
-        mock_run.return_value.returncode = 0
-
-        from clustrix.utils import is_conda_available
-
-        assert is_conda_available() is True
-        mock_run.assert_called_once_with(
-            ["conda", "--version"], capture_output=True, text=True, timeout=10
+        assert get_package_manager_command(ClusterConfig(package_manager="auto")) == (
+            command
         )
 
-    @patch("subprocess.run")
-    def test_is_conda_available_false(self, mock_run):
-        """Test conda availability check when conda is not available."""
-        mock_run.side_effect = FileNotFoundError
+    def test_auto_passes_over_a_uv_that_does_not_work(self, path_dir):
+        """Being on ``PATH`` is not enough; the tool has to answer."""
+        _executable(path_dir, "uv", "exit 1")
+        _executable(path_dir, "conda", "exit 0")
 
-        from clustrix.utils import is_conda_available
-
-        assert is_conda_available() is False
-
-    def test_get_package_manager_command_conda(self):
-        """Test package manager command selection for conda."""
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="conda")
-
-        result = get_package_manager_command(config)
-        assert result == "conda"
-
-    @patch("clustrix.utils.is_uv_available")
-    @patch("clustrix.utils.is_conda_available")
-    def test_get_package_manager_command_auto_conda_available(
-        self, mock_conda_available, mock_uv_available
-    ):
-        """Test auto package manager selection when conda is available but uv is not."""
-        mock_uv_available.return_value = False
-        mock_conda_available.return_value = True
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-        assert result == "conda"
-
-    @patch("clustrix.utils.is_uv_available")
-    @patch("clustrix.utils.is_conda_available")
-    def test_get_package_manager_command_auto_priority(
-        self, mock_conda_available, mock_uv_available
-    ):
-        """Test auto package manager selection priority: uv > conda > pip."""
-        mock_uv_available.return_value = True
-        mock_conda_available.return_value = True
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-        assert result == "uv pip"  # uv has priority over conda
-
-    @patch("clustrix.utils.is_uv_available")
-    @patch("clustrix.utils.is_conda_available")
-    def test_get_package_manager_command_auto_fallback_to_pip(
-        self, mock_conda_available, mock_uv_available
-    ):
-        """Test auto package manager selection fallback to pip."""
-        mock_uv_available.return_value = False
-        mock_conda_available.return_value = False
-        from clustrix.utils import get_package_manager_command
-
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-        assert result == "pip"
+        assert (
+            get_package_manager_command(ClusterConfig(package_manager="auto"))
+            == "conda"
+        )
 
 
 class TestSerializationEdgeCases:
@@ -473,34 +438,6 @@ class TestSerializationEdgeCases:
         assert result_func(25) == 5.0
         assert args == (25,)
         assert kwargs == {}
-
-    def test_deserialize_function_cloudpickle_exception(self):
-        """Test deserialize_function fallback to dill when cloudpickle fails."""
-        # Create a mock dict that will cause cloudpickle to fail
-        mock_data = {
-            "function": b"invalid_cloudpickle_data",
-            "args": pickle.dumps((5,)),
-            "kwargs": pickle.dumps({}),
-        }
-
-        def test_func(x):
-            return x * 3
-
-        def dill_loads(payload):
-            # Only the function payload is the unloadable one; args and kwargs
-            # are ordinary pickles and must come back as themselves.
-            if payload == b"invalid_cloudpickle_data":
-                return test_func
-            return pickle.loads(payload)
-
-        with (
-            patch("cloudpickle.loads", side_effect=Exception("Cloudpickle failed")),
-            patch("dill.loads", side_effect=dill_loads),
-        ):
-            result_func, args, kwargs = deserialize_function(mock_data)
-            assert result_func(5) == 15
-            assert args == (5,)
-            assert kwargs == {}
 
     def test_deserialize_function_invalid_format(self):
         """Test deserialize_function with invalid format raises ValueError."""
