@@ -19,11 +19,6 @@ import logging
 from typing import Dict, Optional
 from pathlib import Path
 
-# Only used by require_test_remote_work_dir, which skips rather than fails
-# when a target is unconfigured. This module lives under tests/, so pytest is
-# always installed alongside it.
-import pytest
-
 # The supported credential path. Guarded so that this module still imports
 # when clustrix itself cannot be; HAS_SECURE_CREDENTIALS gates every use.
 try:
@@ -74,9 +69,6 @@ HOST_ENV_VARS = {
 #: Account to log in as on any of the above.
 USERNAME_ENV_VARS = ("CLUSTRIX_TEST_USERNAME",)
 
-#: Writable directory on the cluster, e.g. a shared home or scratch space.
-REMOTE_WORK_DIR_ENV_VAR = "CLUSTRIX_TEST_SLURM_REMOTE_DIR"
-
 
 def _first_env(names) -> Optional[str]:
     """First of `names` set to a non-empty value, else None."""
@@ -104,11 +96,6 @@ def get_test_username() -> Optional[str]:
     return _first_env(USERNAME_ENV_VARS)
 
 
-def get_test_remote_work_dir(default: Optional[str] = None) -> Optional[str]:
-    """Writable directory on the test clusters, or `default` if unset."""
-    return _first_env((REMOTE_WORK_DIR_ENV_VAR,)) or default
-
-
 def configured_test_hosts():
     """Every distinct host the developer has configured, in role order.
 
@@ -122,20 +109,8 @@ def configured_test_hosts():
     return tuple(seen)
 
 
-def require_test_remote_work_dir() -> str:
-    """Remote work dir, or skip saying which variable to set."""
-    work_dir = get_test_remote_work_dir()
-    if not work_dir:
-        pytest.skip(
-            f"No remote work directory configured: set "
-            f"{REMOTE_WORK_DIR_ENV_VAR} to a writable path on the cluster"
-        )
-    return work_dir
-
-
-#: What to do when no credentials are found. One string, so the pytest skip
-#: reasons and the messages printed by the standalone debug scripts cannot
-#: drift apart -- and so nobody has to guess, as they did while these messages
+#: What to do when no credentials are found. One string, so every message
+#: that gives this advice says the same thing -- and so nobody has to guess, as they did while these messages
 #: still said "add credentials to 1Password" (removed in #97, issue #153).
 CREDENTIAL_SETUP_HINT = (
     "Put SSH_USERNAME and SSH_PASSWORD (or SSH_PRIVATE_KEY_PATH) in "
@@ -468,7 +443,7 @@ class RealWorldCredentialManager:
         print(
             f"  Environment: {'GitHub Actions' if self.is_github_actions else 'Local Development'}"
         )
-        print(f"  Source: ~/.clustrix/.env and the environment")
+        print("  Source: ~/.clustrix/.env and the environment")
 
         status = self.get_credential_status()
         for service, available in status.items():

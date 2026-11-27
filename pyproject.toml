@@ -220,15 +220,11 @@ markers = [
     "real_world: marks tests as real world tests (deselect with '-m \"not real_world\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
-    "expensive: marks tests that cost money or cluster time; tests/real_world skips them without --run-expensive",
     "performance: marks performance benchmark tests",
 ]
 # Carried over from the deleted pytest.ini, where it never took effect. These
 # suppress third-party noise only; nothing here hides a warning raised by
 # clustrix itself.
-# NB: ssh_required is deliberately NOT listed. tests/real_world/conftest.py
-# registers it with addinivalue_line, so --strict-markers is satisfied there
-# and it stays scoped to the suite that defines it.
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",

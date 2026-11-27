@@ -10,7 +10,6 @@ import os
 import logging
 from pathlib import Path
 import tempfile
-import uuid
 
 # Configure logging for real-world tests
 logging.basicConfig(
@@ -18,39 +17,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-class RealWorldTestManager:
-    """Manager for real-world test resources and cost control."""
-
-    def __init__(self):
-        self.api_calls_today = 0
-        self.daily_limit = 100
-        self.cost_limit_usd = 5.0
-        self.current_cost = 0.0
-        self.test_session_id = str(uuid.uuid4())[:8]
-
-    def can_make_api_call(self, estimated_cost: float = 0.01) -> bool:
-        """Check if we can make an API call within cost limits."""
-        if self.api_calls_today >= self.daily_limit:
-            logger.warning(
-                f"Daily API limit reached: {self.api_calls_today}/{self.daily_limit}"
-            )
-            return False
-        if self.current_cost + estimated_cost > self.cost_limit_usd:
-            logger.warning(
-                f"Cost limit would be exceeded: ${self.current_cost + estimated_cost:.2f} > ${self.cost_limit_usd}"
-            )
-            return False
-        return True
-
-    def record_api_call(self, cost: float = 0.01) -> None:
-        """Record an API call and its cost."""
-        self.api_calls_today += 1
-        self.current_cost += cost
-        logger.info(
-            f"API call recorded: {self.api_calls_today}/{self.daily_limit}, cost: ${self.current_cost:.2f}"
-        )
 
 
 class TempResourceManager:
@@ -110,7 +76,3 @@ class TempResourceManager:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.cleanup()
-
-
-# Global test manager instance
-test_manager = RealWorldTestManager()

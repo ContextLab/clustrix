@@ -10,7 +10,7 @@ this was found, but that count only ever grows if nothing enforces it -- so
 ``-m "not real_world"`` did not exclude them. Those tests make real SSH
 connections and real cloud API calls. ``tests/real_world/conftest.py`` had a
 ``pytest_collection_modifyitems`` hook that added *skip* markers for
-expensive/visual/private-cluster tests, but it never applied the
+private-cluster tests, but it never applied the
 ``real_world`` marker itself, so location under the directory was not
 sufficient to keep a forgetful new test out of the "safe" run.
 

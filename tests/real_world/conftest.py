@@ -2,23 +2,17 @@
 Configuration and fixtures for real-world tests.
 """
 
-import os
 import pytest
 from pathlib import Path
-import tempfile
 import functools
 import socket
 import threading
 import time
 
-from tests.real_world import RealWorldTestManager, TempResourceManager
 from tests.real_world.credential_manager import (
     HOST_ENV_VARS,
     configured_test_hosts,
 )
-
-# Create global test manager instance
-test_manager = RealWorldTestManager()
 
 _THIS_DIR = Path(__file__).parent.resolve()
 
@@ -98,55 +92,6 @@ def can_reach_configured_cluster():
     return False
 
 
-@pytest.fixture(scope="session")
-def real_world_test_manager():
-    """Global test manager for real-world tests."""
-    return test_manager
-
-
-@pytest.fixture
-def temp_resource_manager():
-    """Create temporary resource manager for test."""
-    with TempResourceManager() as manager:
-        yield manager
-
-
-@pytest.fixture
-def api_rate_limit_check(real_world_test_manager):
-    """Check API rate limits before test."""
-
-    def check_limit(cost=0.01):
-        if not real_world_test_manager.can_make_api_call(cost):
-            pytest.skip("API rate limit or cost limit reached")
-        return True
-
-    return check_limit
-
-
-@pytest.fixture
-def record_api_call(real_world_test_manager):
-    """Record API call after test."""
-
-    def record(cost=0.01):
-        real_world_test_manager.record_api_call(cost)
-
-    return record
-
-
-def pytest_configure(config):
-    """Configure pytest for real-world tests."""
-    # Add custom markers
-    config.addinivalue_line(
-        "markers", "real_world: mark test as using real external resources"
-    )
-    config.addinivalue_line(
-        "markers", "expensive: mark test as potentially expensive (API costs)"
-    )
-    config.addinivalue_line(
-        "markers", "ssh_required: mark test as requiring SSH access"
-    )
-
-
 def pytest_collection_modifyitems(config, items):
     """Modify test collection for real-world tests.
 
@@ -176,15 +121,6 @@ def pytest_collection_modifyitems(config, items):
         if item_path == _THIS_DIR or _THIS_DIR in item_path.parents:
             item.add_marker(real_world_marker)
 
-    # Skip expensive tests by default unless explicitly requested
-    if not config.getoption("--run-expensive"):
-        skip_expensive = pytest.mark.skip(
-            reason="Expensive tests skipped (use --run-expensive)"
-        )
-        for item in items:
-            if "expensive" in item.keywords:
-                item.add_marker(skip_expensive)
-
     # Skip private-cluster tests unless a configured cluster is reachable
     if not can_reach_configured_cluster():
         skip_cluster_network = pytest.mark.skip(
@@ -204,92 +140,4 @@ def pytest_collection_modifyitems(config, items):
             ):
                 item.add_marker(skip_cluster_network)
 
-
-def pytest_addoption(parser):
-    """Add command line options for real-world tests."""
-    parser.addoption(
-        "--run-expensive",
-        action="store_true",
-        default=False,
-        help="Run expensive tests that may incur API costs",
-    )
-    parser.addoption(
-        "--api-cost-limit",
-        type=float,
-        default=5.0,
-        help="Maximum API cost limit in USD (default: 5.0)",
-    )
-    parser.addoption(
-        "--api-call-limit",
-        type=int,
-        default=100,
-        help="Maximum number of API calls per session (default: 100)",
-    )
-
-
-@pytest.fixture(scope="session", autouse=True)
-def configure_test_limits(request):
-    """Configure test limits from command line options."""
-    cost_limit = request.config.getoption("--api-cost-limit")
-    call_limit = request.config.getoption("--api-call-limit")
-
-    test_manager.cost_limit_usd = cost_limit
-    test_manager.daily_limit = call_limit
-
-    return test_manager
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():
-    """Set up test environment."""
-    # Scratch files go to a temp directory: generated artefacts written into
-    # the source tree leave the working copy dirty after every run.
-    temp_dir = Path(tempfile.gettempdir()) / "clustrix-real-world"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    yield
-
     # Cleanup is handled by individual test managers
-
-
-@pytest.fixture
-def cluster_config_template():
-    """Template for cluster configuration."""
-    from clustrix.config import ClusterConfig
-
-    return {
-        "local": ClusterConfig(cluster_type="local"),
-        "slurm": ClusterConfig(
-            cluster_type="slurm",
-            cluster_host="localhost",
-            username=os.getenv("USER", "testuser"),
-            default_cores=1,
-            default_memory="1GB",
-            default_time="00:30:00",
-        ),
-        "ssh": ClusterConfig(
-            cluster_type="ssh",
-            cluster_host="localhost",
-            username=os.getenv("USER", "testuser"),
-            default_cores=1,
-            default_memory="1GB",
-        ),
-    }
-
-
-@pytest.fixture
-def mock_cluster_responses():
-    """Mock responses for cluster operations."""
-    return {
-        "job_submit": {
-            "job_id": "12345",
-            "status": "submitted",
-            "message": "Job submitted successfully",
-        },
-        "job_status": {"job_id": "12345", "status": "completed", "exit_code": 0},
-        "job_output": {
-            "stdout": "Task completed successfully",
-            "stderr": "",
-            "result": {"value": 42},
-        },
-    }
