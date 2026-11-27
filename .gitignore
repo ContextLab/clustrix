@@ -33,6 +33,14 @@ performance_test_results/
 
 # Personal configuration files
 clustrix.yml
+# ...under any suffix, and in the other two spellings the search reads. A
+# renamed copy is still a personal configuration: `clustrix.yml.local-fossil`
+# was tracked with a real username, hostname and key path in it.
+clustrix.yml.*
+clustrix.yaml
+clustrix.yaml.*
+clustrix.json
+clustrix.json.*
 jupyter.log
 py310-test/
 clustrix_test_env/
