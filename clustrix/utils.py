@@ -4165,9 +4165,10 @@ def gpu_device_groups(devices: Sequence[str], per_job: int, at_most: int) -> Lis
     ]
 
 
-#: Lists every GPU the driver shows as ``<index>, <uuid>``. Run here by
-#: :func:`local_gpu_devices` and on an ssh host by :func:`remote_gpu_devices`.
-GPU_LISTING_COMMAND = ("nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader")
+#: ``nvidia-smi`` arguments that list every GPU the driver shows, as
+#: ``<index>, <uuid>``. Run here by :func:`local_gpu_devices` and on an ssh
+#: host by :func:`remote_gpu_devices`.
+GPU_LISTING_ARGUMENTS = ("--query-gpu=index,uuid", "--format=csv,noheader")
 
 #: Printed before the listing by the remote probe, followed by the login
 #: environment's ``CUDA_VISIBLE_DEVICES`` when it has one.
@@ -4177,8 +4178,8 @@ _VISIBLE_DEVICES_MARK = "CLUSTRIX-CUDA-VISIBLE-DEVICES"
 def usable_gpu_devices(listing: str, visible: Optional[str]) -> List[str]:
     """The device ids a process may use, as it should name them.
 
-    ``listing`` is what ``GPU_LISTING_COMMAND`` printed (empty when there
-    is no ``nvidia-smi``) and ``visible`` the process's
+    ``listing`` is what ``nvidia-smi`` printed for ``GPU_LISTING_ARGUMENTS``
+    (empty when there is no ``nvidia-smi``) and ``visible`` the process's
     ``CUDA_VISIBLE_DEVICES``, ``None`` when it is not set.
 
     Not set: every listed device, by index. Set -- by a scheduler, a
@@ -4215,7 +4216,10 @@ def local_gpu_devices() -> List[str]:
     """
     try:
         listing = subprocess.run(
-            list(GPU_LISTING_COMMAND), capture_output=True, text=True, timeout=30
+            ["nvidia-smi", *GPU_LISTING_ARGUMENTS],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -4227,7 +4231,9 @@ def local_gpu_devices() -> List[str]:
 #: The listing, preceded by the shell's ``CUDA_VISIBLE_DEVICES`` if it has one.
 GPU_PROBE_COMMAND = (
     f"echo {_VISIBLE_DEVICES_MARK} ${{CUDA_VISIBLE_DEVICES+set}} "
-    '"$CUDA_VISIBLE_DEVICES"; ' + " ".join(GPU_LISTING_COMMAND) + " 2>/dev/null; true"
+    '"$CUDA_VISIBLE_DEVICES"; '
+    + " ".join(("nvidia-smi", *GPU_LISTING_ARGUMENTS))
+    + " 2>/dev/null; true"
 )
 
 

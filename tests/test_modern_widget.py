@@ -1482,7 +1482,7 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
     the notebook -- the exposure the password field was changed to avoid.
     Setting ``value`` here is what the browser does when the field is left."""
 
-    SECRET = "s3cr3t-typed-into-the-variables-field"
+    TYPED = "clustrix-sentinel-typed-into-the-variables-field"
 
     def _typed(self, text):
         widget = ModernClustrixWidget()
@@ -1493,31 +1493,31 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         return widget._config_data_from_widgets()["environment_variables"]
 
     def test_a_committed_value_is_held_and_only_the_name_is_shown(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nOMP_NUM_THREADS=4")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}\nOMP_NUM_THREADS=4")
 
         assert field.value == (
             f"DB_PASSWORD={ENVIRONMENT_MASK}\nOMP_NUM_THREADS={ENVIRONMENT_MASK}"
         )
         assert self._held(widget) == {
-            "DB_PASSWORD": self.SECRET,
+            "DB_PASSWORD": self.TYPED,
             "OMP_NUM_THREADS": "4",
         }
-        assert self.SECRET not in _every_state(widget)
+        assert self.TYPED not in _every_state(widget)
 
     def test_an_unchanged_masked_line_keeps_its_value(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}")
 
         field.value = field.value + "\n"  # left again, nothing retyped
 
-        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
+        assert self._held(widget) == {"DB_PASSWORD": self.TYPED}
 
     def test_adding_a_line_keeps_the_others(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}")
 
         field.value = field.value + "\nREGION=eu-west-1"
 
         assert self._held(widget) == {
-            "DB_PASSWORD": self.SECRET,
+            "DB_PASSWORD": self.TYPED,
             "REGION": "eu-west-1",
         }
         assert field.value.splitlines() == [
@@ -1526,7 +1526,7 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         ]
 
     def test_deleting_a_line_drops_that_variable(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}\nREGION=eu-west-1")
 
         field.value = f"REGION={ENVIRONMENT_MASK}"
 
@@ -1535,7 +1535,7 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         assert self._held(widget) == {} and widget._environment == {}
 
     def test_retyping_a_line_replaces_that_variable_s_value(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}\nREGION=eu-west-1")
 
         field.value = f"DB_PASSWORD=a-new-one\nREGION={ENVIRONMENT_MASK}"
 
@@ -1546,12 +1546,12 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         assert "a-new-one" not in _every_state(widget)
 
     def test_renaming_a_masked_line_keeps_the_value_under_the_new_name(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}\nREGION=eu-west-1")
 
         field.value = f"DATABASE_PASSWORD={ENVIRONMENT_MASK}\nREGION={ENVIRONMENT_MASK}"
 
         assert self._held(widget) == {
-            "DATABASE_PASSWORD": self.SECRET,
+            "DATABASE_PASSWORD": self.TYPED,
             "REGION": "eu-west-1",
         }
 
@@ -1567,11 +1567,11 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         assert "C has no value: write C=value" in told and pill(widget) == "invalid"
 
     def test_typing_into_the_mask_changes_nothing_and_says_so(self):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}")
 
         field.value = f"DB_PASSWORD={ENVIRONMENT_MASK}x"
 
-        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
+        assert self._held(widget) == {"DB_PASSWORD": self.TYPED}
         assert field.value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
         assert pill(widget) == "check the variables"
         (said,) = widget._environment_notes
@@ -1588,27 +1588,27 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
     def test_a_line_that_is_not_a_variable_is_not_shown_back(self):
         """It may be a secret pasted on its own; it is removed, and the
         form says a line was removed without repeating it."""
-        widget, field = self._typed(f"GOOD=1\n{self.SECRET} pasted alone")
+        widget, field = self._typed(f"GOOD=1\n{self.TYPED} pasted alone")
 
         assert field.value == f"GOOD={ENVIRONMENT_MASK}"
         assert widget._environment_notes == [ENVIRONMENT_LINE_REMOVED]
-        assert self.SECRET not in _every_state(widget)
+        assert self.TYPED not in _every_state(widget)
         assert pill(widget) == "check the variables"
         assert "cx-invalid" in field._dom_classes
         # Said once. The field is consistent again, so nothing is refused.
         assert widget._validation_problems() == []
 
     def test_a_value_under_a_bad_name_is_masked_too(self, capsys):
-        widget, field = self._typed(f"export TOKEN={self.SECRET}")
+        widget, field = self._typed(f"export TOKEN={self.TYPED}")
 
         told = _click(widget, "apply_btn", capsys)
 
         assert field.value == f"export TOKEN={ENVIRONMENT_MASK}"
         assert "'export TOKEN'" in told
-        assert self.SECRET not in told + _every_state(widget)
+        assert self.TYPED not in told + _every_state(widget)
         # Correcting the name in place keeps the value.
         field.value = f"TOKEN={ENVIRONMENT_MASK}"
-        assert self._held(widget) == {"TOKEN": self.SECRET}
+        assert self._held(widget) == {"TOKEN": self.TYPED}
 
     def test_values_survive_a_switch_of_profile_and_back_still_masked(self):
         widget = ModernClustrixWidget()
@@ -1616,41 +1616,39 @@ class TestEnvironmentVariableValuesAreNotLeftInTheForm:
         other = next(
             name for name in widget.profile_manager.get_profile_names() if name != first
         )
-        widget.widgets["env_vars"].value = f"DB_PASSWORD={self.SECRET}"
+        widget.widgets["env_vars"].value = f"DB_PASSWORD={self.TYPED}"
 
         widget.widgets["profile_dropdown"].value = other
         assert widget.widgets["env_vars"].value == ""
         widget.widgets["profile_dropdown"].value = first
 
         assert widget.widgets["env_vars"].value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
-        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
-        assert self.SECRET not in _every_state(widget)
+        assert self._held(widget) == {"DB_PASSWORD": self.TYPED}
+        assert self.TYPED not in _every_state(widget)
 
     def test_applied_values_reach_the_configuration_and_nothing_else(self, capsys):
-        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+        widget, field = self._typed(f"DB_PASSWORD={self.TYPED}")
 
         told = _click(widget, "apply_btn", capsys)
 
         assert pill(widget) == "applied"
-        assert get_config().environment_variables == {"DB_PASSWORD": self.SECRET}
+        assert get_config().environment_variables == {"DB_PASSWORD": self.TYPED}
         assert "environment variables" in told, "said to be session-only"
-        assert self.SECRET not in told + _every_state(widget)
+        assert self.TYPED not in told + _every_state(widget)
         assert field.value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
 
     def test_no_typed_secret_of_any_kind_is_in_any_control_s_state(self, capsys):
         widget = ModernClustrixWidget()
-        widget.widgets["password"].value = "pw-" + self.SECRET
-        widget.widgets["hf_token"].value = "hf-" + self.SECRET
+        widget.widgets["password"].value = "pw-" + self.TYPED
+        widget.widgets["hf_token"].value = "hf-" + self.TYPED
         widget.widgets["env_vars"].value = (
-            f"A=env-{self.SECRET}\nnot a line {self.SECRET}"
+            f"A=env-{self.TYPED}\nnot a line {self.TYPED}"
         )
         _click(widget, "apply_btn", capsys)
-        widget.widgets["env_vars"].value = (
-            f"A={ENVIRONMENT_MASK}\nB=again-{self.SECRET}"
-        )
+        widget.widgets["env_vars"].value = f"A={ENVIRONMENT_MASK}\nB=again-{self.TYPED}"
         _click(widget, "add_profile_btn", capsys)
 
-        assert self.SECRET not in _every_state(widget)
+        assert self.TYPED not in _every_state(widget)
 
 
 class TestAHeldSecretCanBeDropped:

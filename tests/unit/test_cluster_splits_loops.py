@@ -1070,6 +1070,16 @@ class TestSigtermStopsTheCall:
     """The handler itself, with real signals. That it cancels real jobs is
     ``tests/real_world/test_sigterm_cancels_jobs_real.py``."""
 
+    @pytest.fixture(autouse=True)
+    def default_disposition(self):
+        """Each test starts from the default, whatever an earlier test in
+        this process left installed, and puts that back afterwards."""
+        import signal
+
+        previous = signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        yield
+        signal.signal(signal.SIGTERM, previous)
+
     def test_a_real_sigterm_unwinds_the_block_and_the_process_dies_by_it(
         self, tmp_path
     ):
