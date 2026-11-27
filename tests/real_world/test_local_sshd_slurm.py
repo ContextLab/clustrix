@@ -606,3 +606,126 @@ def test_a_split_found_unsafe_on_the_cluster_falls_back_to_the_direct_answer(
 
     assert result == expected == [11, 13, 16, 20]
     assert "tallied: not split -- the loop changed" in caplog.text
+
+
+# -- a divided loop that is interrupted, or fails ----------------------------------
+
+INTERRUPTED_LOOP = """
+import signal, sys
+signal.signal(signal.SIGINT, signal.default_int_handler)
+from clustrix import cluster, configure
+
+configure(cluster_type=sys.argv[1], cluster_host={host!r}, cluster_port={port!r},
+          username={user!r}, key_file={key!r}, ssh_host_key_policy="auto_add",
+          remote_work_dir=sys.argv[2], replicate_local_environment=False,
+          job_poll_interval=1, job_wait_timeout=300, max_parallel_jobs=3,
+          auto_stage=False)
+
+@cluster(cores=1, memory="200MB", time="00:05:00")
+def slow(n):
+    out = []
+    for i in range(n):
+        import time
+        time.sleep(120)
+        out.append(i)
+    return out
+
+print("STARTED", flush=True)
+print("FINISHED", slow(3), flush=True)
+"""
+
+
+def test_ctrl_c_during_a_divided_loop_cancels_every_job_it_started(backend, tmp_path):
+    """The job being waited for was the one job not cancelled: after an
+    interrupt it went on running -- visible in ``squeue`` -- for a result
+    nobody would collect."""
+    import signal
+    import uuid
+
+    import clustrix
+
+    marker = f"clustrix-cancel-{uuid.uuid4().hex[:8]}"
+    if backend == "slurm":
+        still_there = f"squeue -h -o '%i %T %Z' | grep {marker}"
+    else:
+        # An ssh job is ``bash job.sh`` run from its job directory: the
+        # directory is in no command line, only in the process's cwd.
+        still_there = (
+            "for p in $(pgrep -u $(id -u)); do readlink /proc/$p/cwd; done "
+            f"2>/dev/null | grep {marker}/job_ | sort -u"
+        )
+
+    def jobs():
+        return _remote(still_there).stdout.splitlines()
+
+    script = tmp_path / "interrupted_loop.py"
+    script.write_text(
+        INTERRUPTED_LOOP.format(host=HOST, port=PORT, user=USER, key=str(KEY))
+    )
+    driver = subprocess.Popen(
+        [sys.executable, str(script), backend, f"~/{marker}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.path.dirname(os.path.dirname(clustrix.__file__)),
+        },
+    )
+    try:
+        assert driver.stdout.readline().strip() == "STARTED"
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and len(jobs()) < 3:
+            assert driver.poll() is None, driver.stderr.read()
+            time.sleep(1)
+        before = jobs()
+        assert len(before) >= 3, f"the three chunks never all started: {before}"
+
+        driver.send_signal(signal.SIGINT)
+        out, err = driver.communicate(timeout=120)
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and jobs():
+            time.sleep(1)
+        after = jobs()
+    finally:
+        driver.kill()
+        if backend == "slurm":
+            _remote(
+                "scancel $(squeue -h -o '%i %Z' | grep " + marker + " | cut -d' ' -f1)"
+            )
+        else:
+            _remote(
+                "for p in $(pgrep -u $(id -u)); do readlink /proc/$p/cwd | "
+                f"grep -q {marker}/job_ && kill $p; done 2>/dev/null"
+            )
+        _remote(f"rm -rf ~/{marker}")
+
+    print("before:", before, "after:", after, err[-1500:], sep="\n")
+    assert "KeyboardInterrupt" in err and "FINISHED" not in out
+    assert after == [], f"jobs left running after the interrupt: {after}"
+
+
+def test_a_failing_chunk_stops_the_others_without_complaint(backend, caplog):
+    """The chunk that failed is among the jobs "not collected". Cancelling
+    it too must be harmless and silent."""
+    configure(max_parallel_jobs=3, replicate_local_environment=False)
+
+    def trips(values):
+        out = []
+        for value in values:
+            import time
+
+            if value == 0:
+                raise JobError("the first chunk fails")
+            time.sleep(60)
+            out.append(value)
+        return out
+
+    started = time.monotonic()
+    with caplog.at_level("WARNING", logger="clustrix.decorator"):
+        with pytest.raises(JobError, match="the first chunk fails"):
+            cluster(**RESOURCES)(trips)([0, 1, 2])
+
+    assert time.monotonic() - started < 50, "it waited for the other chunks"
+    assert "Could not cancel" not in caplog.text, caplog.text
