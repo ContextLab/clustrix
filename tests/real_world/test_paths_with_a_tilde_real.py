@@ -18,9 +18,10 @@ import shutil
 import uuid
 
 import pytest
+import yaml
 
 from clustrix import cluster, configure, get_config
-from clustrix.config import ClusterConfig
+from clustrix.config import ClusterConfig, load_config
 from clustrix.executor_connections import ConnectionManager
 from clustrix.filesystem import (
     cluster_count_files,
@@ -75,6 +76,33 @@ def _config(key_file, **overrides) -> ClusterConfig:
 def test_a_key_file_written_with_a_tilde_authenticates(host_facts, key_under_home):
     config = _config(key_under_home)
     assert config.key_file.startswith("~/"), "the test must exercise the tilde"
+
+    with ConnectionManager(config) as manager:
+        out, _ = manager.execute_remote_command("id -un")
+
+    assert out.strip() == USER
+
+
+def test_a_key_file_written_with_a_tilde_in_a_config_file_authenticates(
+    host_facts, key_under_home, tmp_path
+):
+    """The same field, reached the way most people set it: a YAML file."""
+    path = tmp_path / "cluster.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "cluster_type": "ssh",
+                "cluster_host": HOST,
+                "cluster_port": PORT,
+                "username": USER,
+                "key_file": key_under_home,
+                "ssh_host_key_policy": "auto_add",
+            }
+        )
+    )
+    load_config(str(path))
+    config = get_config()
+    assert config.key_file == key_under_home
 
     with ConnectionManager(config) as manager:
         out, _ = manager.execute_remote_command("id -un")
