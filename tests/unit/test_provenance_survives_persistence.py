@@ -446,7 +446,7 @@ _PRE_FIX_LAUNDER = """
 
 #: Process 2, run by *this* checkout: the upgraded user, doing the ordinary
 #: thing -- opening the store and applying a profile. ``configure(**asdict)``
-#: is what both widgets' Apply buttons do, and it is the step that made
+#: is what the widget's Apply button does, and it is the step that made
 #: marking only the object untrusted worth nothing: it builds a fresh object
 #: whose own source is ``runtime``.
 _AFTER_UPGRADE = """

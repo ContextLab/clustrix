@@ -3353,7 +3353,7 @@ def test_ssh_key_setup_does_not_offer_your_key_collection_to_a_repo_host(
     ``config.cluster_host`` (``detect_existing_ssh_key``), one
     ``key_filename=`` at a time -- so turning paramiko's own search off says
     nothing about it. It is public API, ``clustrix ssh-setup`` calls it,
-    both widgets have a button for it, and ``setup_auth_with_fallback``
+    the widget has a button for it, and ``setup_auth_with_fallback``
     reaches it too. A ``./clustrix.yml`` naming ``cluster_host`` was enough
     to have the victim's whole key collection presented to the host that
     file named, and the attacker learns which of them the victim holds even
