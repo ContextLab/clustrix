@@ -27,6 +27,7 @@ import base64
 import hashlib
 import logging
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
@@ -61,7 +62,22 @@ class HostKeyVerificationError(paramiko.SSHException):
     Subclasses ``paramiko.SSHException`` so code that already catches that
     (or ``Exception``) continues to see connection failures as failures --
     it just gets a much more actionable message.
+
+    ``hostname`` is the name the key would be filed under in ``known_hosts``
+    (``[host]:port`` for a non-default port) and ``key`` is the key that was
+    offered, so a caller that has shown the user the fingerprint can trust
+    *that* key with :func:`trust_offered_host_key` instead of scanning the
+    host a second time and trusting whatever answers then.
     """
+
+    def __init__(self, message: str, hostname: str, key: paramiko.PKey):
+        super().__init__(message)
+        self.hostname = hostname
+        self.key = key
+
+    @property
+    def fingerprint(self) -> str:
+        return f"{self.key.get_name()} {_fingerprint(self.key)}"
 
 
 def _fingerprint(key: paramiko.PKey) -> str:
@@ -81,12 +97,15 @@ class RejectUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
     def missing_host_key(
         self, client: paramiko.SSHClient, hostname: str, key: paramiko.PKey
     ) -> None:
-        port_hint = ""
-        transport = client.get_transport()
-        if transport is not None:
-            peer = transport.getpeername()
-            if peer and len(peer) > 1 and peer[1] not in (22, None):
-                port_hint = f" -p {peer[1]}"
+        # paramiko names a host on a non-default port "[host]:port", which
+        # is how known_hosts files it. ssh-keyscan wants the two apart: the
+        # hint used to pass the bracketed form after -p, a command that
+        # cannot resolve its own argument.
+        bracketed = re.fullmatch(r"\[(?P<host>.+)\]:(?P<port>\d+)", hostname)
+        if bracketed:
+            scan = f"ssh-keyscan -p {bracketed['port']} {bracketed['host']}"
+        else:
+            scan = f"ssh-keyscan {hostname}"
 
         raise HostKeyVerificationError(
             f"Host key verification failed for '{hostname}': this host is not "
@@ -95,13 +114,15 @@ class RejectUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
             f"  Offered key: {key.get_name()} {_fingerprint(key)}\n\n"
             f"To fix this:\n"
             f"  1. If you recognize and trust this host, add its key with:\n"
-            f"       ssh-keyscan{port_hint} {hostname} >> ~/.ssh/known_hosts\n"
+            f"       {scan} >> ~/.ssh/known_hosts\n"
             f"     then retry.\n"
             f"  2. If you understand the risk and want clustrix to trust "
             f"unknown host keys automatically (NOT recommended -- this is "
             f"exactly the behavior that enables MITM attacks), set on "
             f"ClusterConfig:\n"
-            f'       ssh_host_key_policy="auto_add"\n'
+            f'       ssh_host_key_policy="auto_add"\n',
+            hostname=hostname,
+            key=key,
         )
 
 
@@ -152,27 +173,10 @@ class AppendUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
     def missing_host_key(
         self, client: paramiko.SSHClient, hostname: str, key: paramiko.PKey
     ) -> None:
-        line = HostKeyEntry([hostname], key).to_line()
-        if line is None:  # pragma: no cover - paramiko sets valid=True in __init__
-            raise paramiko.SSHException(
-                f"Cannot record the host key offered by '{hostname}': paramiko "
-                f"produced no known_hosts line for a {key.get_name()} key."
-            )
-
         # In-memory first, so the rest of *this* process recognises the host
         # even if the file write fails and raises.
         client.get_host_keys().add(hostname, key.get_name(), key)
-
-        known_hosts = user_known_hosts_path()
-        # OpenSSH's own modes for a directory it creates before first
-        # contact. write_text_securely creates the file itself at 0600.
-        known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # append=True is the mode write_text_securely documents for exactly
-        # this file: it appends with a single O_APPEND write, does not
-        # follow-and-chmod (known_hosts is commonly a symlink into a
-        # dotfiles repo), and leaves the mode of a file it did not create
-        # alone.
-        write_text_securely(known_hosts, line, append=True)
+        known_hosts = _append_known_host(hostname, key)
         logger.warning(
             "Trusted the unverified host key %s offered by %s and appended it "
             "to %s.",
@@ -180,6 +184,50 @@ class AppendUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
             hostname,
             known_hosts,
         )
+
+
+def _append_known_host(hostname: str, key: paramiko.PKey) -> Path:
+    """Append one ``known_hosts`` line for ``hostname``; return the file."""
+    line = HostKeyEntry([hostname], key).to_line()
+    if line is None:  # pragma: no cover - paramiko sets valid=True in __init__
+        raise paramiko.SSHException(
+            f"Cannot record the host key offered by '{hostname}': paramiko "
+            f"produced no known_hosts line for a {key.get_name()} key."
+        )
+    known_hosts = user_known_hosts_path()
+    # OpenSSH's own modes for a directory it creates before first contact.
+    # write_text_securely creates the file itself at 0600.
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # append=True is the mode write_text_securely documents for exactly this
+    # file: it appends with a single O_APPEND write, does not
+    # follow-and-chmod (known_hosts is commonly a symlink into a dotfiles
+    # repo), and leaves the mode of a file it did not create alone.
+    write_text_securely(known_hosts, line, append=True)
+    return known_hosts
+
+
+def trust_offered_host_key(error: HostKeyVerificationError) -> Path:
+    """Record the key a refused connection was offered; return the file.
+
+    For a caller that caught :class:`HostKeyVerificationError`, showed the
+    user ``error.fingerprint`` and was told to go ahead. It records exactly
+    the key that was shown. Re-scanning the host instead would trust
+    whatever answers the second time, which need not be what the user
+    approved.
+
+    Like ``ssh_host_key_policy="auto_add"`` this is persistent and global --
+    the user's own ``ssh`` will accept the host afterwards -- so it must only
+    ever follow an explicit decision by the person at the keyboard.
+    """
+    known_hosts = _append_known_host(error.hostname, error.key)
+    logger.warning(
+        "Trusted the host key %s offered by %s, at the user's request, and "
+        "appended it to %s.",
+        error.fingerprint,
+        error.hostname,
+        known_hosts,
+    )
+    return known_hosts
 
 
 def user_known_hosts_path() -> Path:

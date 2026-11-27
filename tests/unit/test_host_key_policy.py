@@ -523,3 +523,119 @@ def test_the_openssh_spelling_of_every_policy_is_defined():
     assert host_key_policy_name({"ssh_host_key_policy": "reject"}) == "reject"
     with pytest.raises(ValueError, match="Invalid ssh_host_key_policy"):
         openssh_strict_host_key_checking({"ssh_host_key_policy": "accept-new"})
+
+
+# -- trusting exactly the key that was shown ---------------------------------
+
+
+def _refused_connection(server, tmp_path) -> HostKeyVerificationError:
+    """Connect to ``server`` under the default policy; return the refusal."""
+    client = paramiko.SSHClient()
+    configure_host_key_policy(client, ClusterConfig())
+    with pytest.raises(HostKeyVerificationError) as refused:
+        client.connect(
+            server.host,
+            port=server.port,
+            username="tester",
+            password="pw",
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=10,
+        )
+    client.close()
+    return refused.value
+
+
+def test_a_refusal_carries_the_key_it_was_offered(tmp_path):
+    """The error is what a caller shows the user, so it must name the host
+    as known_hosts would and hold the very key the fingerprint describes."""
+    with LocalSSHServer(root=str(tmp_path), password="pw") as server:
+        error = _refused_connection(server, tmp_path)
+        offered = server.host_keys()[0]
+
+        assert error.hostname == f"[{server.host}]:{server.port}"
+        assert error.key.asbytes() == offered.asbytes()
+        assert error.fingerprint.startswith(f"{offered.get_name()} SHA256:")
+        assert error.fingerprint in str(error)
+
+
+def test_the_suggested_keyscan_command_separates_host_from_port(tmp_path):
+    """It used to print ``ssh-keyscan -p 2222 [host]:2222``: the bracketed
+    known_hosts spelling handed to a tool that wants the two apart."""
+    with LocalSSHServer(root=str(tmp_path), password="pw") as server:
+        message = str(_refused_connection(server, tmp_path))
+
+    assert f"ssh-keyscan -p {server.port} {server.host} >>" in message
+    assert f"ssh-keyscan -p {server.port} [" not in message
+
+
+def test_trusting_a_refusal_records_that_key_and_nothing_else(tmp_path):
+    """After the user approves the fingerprint, the same host connects under
+    the default (reject) policy -- and the file gained exactly one line."""
+    from clustrix.ssh_security import trust_offered_host_key
+
+    known_hosts = user_known_hosts_path()
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    existing_key = _generate_private_key(tmp_path).with_suffix(".pub").read_text()
+    existing = "example.org " + " ".join(existing_key.split()[:2])
+    known_hosts.write_text(f"# mine\n{existing}\n")
+
+    with LocalSSHServer(root=str(tmp_path), password="pw") as server:
+        error = _refused_connection(server, tmp_path)
+
+        assert trust_offered_host_key(error) == known_hosts
+        lines = known_hosts.read_text().splitlines()
+        assert lines[:2] == ["# mine", existing]
+        assert len(lines) == 3
+        assert lines[2].startswith(f"[{server.host}]:{server.port} ")
+
+        client = paramiko.SSHClient()
+        configure_host_key_policy(client, ClusterConfig())
+        client.connect(
+            server.host,
+            port=server.port,
+            username="tester",
+            password="pw",
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=10,
+        )
+        _, stdout, _ = client.exec_command("echo reached")
+        assert stdout.read().decode().strip() == "reached"
+        client.close()
+
+
+def test_a_different_key_is_still_refused_after_trusting_one(tmp_path):
+    """Trusting one key must not open the host to another: a server on the
+    same address presenting a different key is a changed host key."""
+    from clustrix.ssh_security import trust_offered_host_key
+
+    with LocalSSHServer(root=str(tmp_path), password="pw") as server:
+        error = _refused_connection(server, tmp_path)
+        impostor = paramiko.Ed25519Key.from_private_key_file(
+            str(_generate_private_key(tmp_path))
+        )
+        error.key = impostor
+        trust_offered_host_key(error)
+
+        client = paramiko.SSHClient()
+        configure_host_key_policy(client, ClusterConfig())
+        with pytest.raises(paramiko.BadHostKeyException):
+            client.connect(
+                server.host,
+                port=server.port,
+                username="tester",
+                password="pw",
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=10,
+            )
+        client.close()
+
+
+def _generate_private_key(tmp_path) -> Path:
+    from tests.ssh_server import generate_keypair
+
+    directory = tmp_path / "impostor"
+    directory.mkdir()
+    return generate_keypair(directory)

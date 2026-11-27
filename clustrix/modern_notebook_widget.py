@@ -7,6 +7,7 @@ import html
 import logging
 import os
 import re
+import warnings
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
@@ -40,6 +41,7 @@ from .config import (
 )
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
+from .ssh_security import HostKeyVerificationError, trust_offered_host_key
 from .widget_controls import set_choice
 from .widget_style import STYLESHEET
 
@@ -217,6 +219,8 @@ class ModernClustrixWidget:
         # Set while the widget is writing values into its own controls, so the
         # resulting change events are not mistaken for edits by the user.
         self._suspend_profile_capture = False
+        # The refused connection whose host key the user is being asked about.
+        self._untrusted_host: Optional[HostKeyVerificationError] = None
         self.widgets: Dict[str, Any] = {}
 
         self._create_controls()
@@ -383,6 +387,11 @@ class ModernClustrixWidget:
         w["apply_btn"] = self._button(
             "Apply", "Make @cluster use what is shown here", primary=True
         )
+        w["trust_host_btn"] = self._button(
+            "Trust this host",
+            "Record the host key shown below in known_hosts, then connect",
+        )
+        w["trust_host_btn"].layout.display = "none"
         w["status_pill"] = widgets.HTML()
         w["in_use"] = widgets.HTML()
         w["output"] = widgets.Output()
@@ -516,7 +525,8 @@ class ModernClustrixWidget:
         action_row = widgets.Box([w["advanced_toggle"], main_actions])
         action_row.add_class("cx-row")
         action_row.add_class("cx-actions")
-        actions = widgets.VBox([action_row, w["output"]])
+        actions = widgets.VBox([action_row, w["output"], w["trust_host_btn"]])
+        w["trust_host_btn"].layout.margin = "10px 0 0 0"
         actions.add_class("cx-section")
         w["output"].layout.margin = "10px 0 0 0"
 
@@ -555,6 +565,7 @@ class ModernClustrixWidget:
         w["test_connect_btn"].on_click(self._on_test_connect)
         w["test_submit_btn"].on_click(self._on_test_submit)
         w["apply_btn"].on_click(self._on_apply_config)
+        w["trust_host_btn"].on_click(self._on_trust_host)
         for key in FORM_CONTROLS:
             w[key].observe(self._on_field_edit, names="value")
 
@@ -657,6 +668,8 @@ class ModernClustrixWidget:
         """
         output = self.widgets["output"]
         output.clear_output()
+        self._untrusted_host = None
+        self.widgets["trust_host_btn"].layout.display = "none"
         button = self.widgets[key]
         original = button.description
         button.description = busy_label
@@ -726,9 +739,16 @@ class ModernClustrixWidget:
         if not profile_name or self._suspend_profile_capture:
             return
         try:
-            self.profile_manager.save_profile(
-                profile_name, self._get_config_from_widgets()
-            )
+            with warnings.catch_warnings():
+                # ProfileManager warns that secrets are not written to disk.
+                # The password and token fields say so themselves, and in a
+                # notebook the warning lands as a red block above the form.
+                warnings.filterwarnings(
+                    "ignore", message="Profiles are not a credential store"
+                )
+                self.profile_manager.save_profile(
+                    profile_name, self._get_config_from_widgets()
+                )
         except (ValueError, OSError) as e:
             self._report(f"Could not keep the changes to '{profile_name}': {e}")
             self.set_status("error", "not saved")
@@ -1078,6 +1098,43 @@ class ModernClustrixWidget:
                 lines.append(f"Scheduler found: {version.strip()}.")
         return lines
 
+    def _explain_failure(self, error: Exception, what: str, status: str) -> None:
+        """Print why a connection or job failed, and offer the way forward.
+
+        A host this machine has never connected to is the one failure every
+        new user meets, and the remedy is a decision rather than a fix: the
+        fingerprint is shown and a button offers to trust exactly that key.
+        """
+        if not isinstance(error, HostKeyVerificationError):
+            print(f"{what}: {type(error).__name__}: {error}")
+            self.set_status("error", status)
+            return
+        self._untrusted_host = error
+        self.widgets["trust_host_btn"].layout.display = None
+        print(f"This machine has not connected to {error.hostname} before.")
+        print(f"The host identified itself with the key:\n  {error.fingerprint}")
+        print(
+            "If that matches the fingerprint your cluster publishes, press "
+            "'Trust this host'.\nIf it does not, stop: something may be "
+            "impersonating the host."
+        )
+        self.set_status("error", "unknown host")
+
+    def _on_trust_host(self, button) -> None:
+        """Record the host key the user was just shown, then connect."""
+        error = self._untrusted_host
+        if error is None:
+            return
+        try:
+            known_hosts = trust_offered_host_key(error)
+        except OSError as e:
+            self._report(f"Could not record the host key: {e}")
+            self.set_status("error", "not trusted")
+            return
+        self._on_test_connect(None)
+        with self.widgets["output"]:
+            print(f"Recorded the key for {error.hostname} in {known_hosts}.")
+
     def _on_test_connect(self, button) -> None:
         """Connect and authenticate to the backend on screen, without a job."""
         with self._action("test_connect_btn", "Testing…", "testing…"):
@@ -1091,8 +1148,7 @@ class ModernClustrixWidget:
                 # stops a connection -- DNS, a refused host key, a rejected
                 # token -- and each of those raises a different type from a
                 # different library.
-                print(f"Connection failed: {type(e).__name__}: {e}")
-                self.set_status("error", "not connected")
+                self._explain_failure(e, "Connection failed", "not connected")
                 return
             print("\n".join(lines))
             self.set_status("ok", "connected")
@@ -1134,8 +1190,7 @@ class ModernClustrixWidget:
                         result = executor.wait_for_result(job_id)
             except Exception as e:  # noqa: BLE001 - reported to the user below
                 # Broad for the same reason as _on_test_connect.
-                print(f"Test job failed: {type(e).__name__}: {e}")
-                self.set_status("error", "job failed")
+                self._explain_failure(e, "Test job failed", "job failed")
                 return
 
             print(f"Test job succeeded on {config.cluster_type}.")
@@ -1260,10 +1315,9 @@ class ModernClustrixWidget:
     #: ``password_env_var``/``use_env_password`` name a *channel*: which
     #: environment variable a password is read from. Switching backend says
     #: nothing about that variable, so clearing it destroys a setting the
-    #: switch had no opinion about -- which is exactly what a modern-widget
-    #: Apply on a ``local`` profile used to do. The legacy widget leaves both
-    #: alone (neither is in its WIDGET_MANAGED_FIELDS), and
-    #: TestACredentialChannelIsNotABackendSetting holds the two together.
+    #: switch had no opinion about -- which is exactly what Apply on a
+    #: ``local`` profile used to do. TestACredentialChannelIsNotABackendSetting
+    #: holds that in place.
     #:
     #: Stated as a rule that can be applied to the next field: **does the
     #: value stop being correct when the target changes?** Not "where does it
