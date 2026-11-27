@@ -1,20 +1,22 @@
 """Tests for enhanced features: dependency handling, uv support, and configuration enhancements."""
 
 import pytest
-import subprocess
-from unittest.mock import Mock, patch
+import shutil
 import tempfile
 import os
 
+import dill
+
 from clustrix.config import ClusterConfig, get_config, configure
+from clustrix.executor_connections import ConnectionManager
 from clustrix.utils import (
     get_environment_requirements,
     get_unreproducible_requirements,
     get_environment_info,
-    is_uv_available,
     get_package_manager_command,
     setup_remote_environment,
 )
+from tests.ssh_server import LocalSSHServer
 
 
 class TestEnhancedDependencyHandling:
@@ -59,157 +61,27 @@ class TestEnhancedDependencyHandling:
         for name in conda_installed:
             assert requirements[name]
 
-    @patch("subprocess.run")
-    def test_get_environment_requirements_editable_packages_excluded(self, mock_run):
-        """Test that editable packages (-e) are excluded."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = """numpy==1.21.0
--e git+https://github.com/user/repo.git@main#egg=mypackage
-pandas==1.3.0
--e /path/to/local/package
-requests==2.25.1
-"""
-        mock_run.return_value = mock_result
+    def test_get_environment_info_is_the_freeze_listing_of_this_interpreter(self):
+        """One ``name==version`` line per package, read from the real pip.
 
-        requirements = get_environment_requirements()
+        The version this replaces handed ``subprocess.run`` a ``Mock`` whose
+        stdout was two invented lines and asserted the same two lines came
+        back. Here pip really runs, and the listing has to agree with what
+        this interpreter can import.
+        """
+        listing = get_environment_info().splitlines()
 
-        # Verify editable packages are excluded
-        assert "numpy" in requirements
-        assert "pandas" in requirements
-        assert "requests" in requirements
-        # Editable packages should not be included
-        editable_keys = [key for key in requirements.keys() if key.startswith("-e")]
-        assert len(editable_keys) == 0
-
-    @patch("subprocess.run")
-    @patch("clustrix.utils.importlib.import_module")
-    def test_get_environment_requirements_essential_fallback(
-        self, mock_import, mock_run
-    ):
-        """Test fallback to essential packages when pip fails."""
-        # Mock pip command failure
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_run.return_value = mock_result
-
-        # Mock successful import of essential packages
-        mock_cloudpickle = Mock()
-        mock_cloudpickle.__version__ = "2.0.0"
-        mock_dill = Mock()
-        mock_dill.__version__ = "0.3.4"
-
-        def mock_import_side_effect(module_name):
-            if module_name == "cloudpickle":
-                return mock_cloudpickle
-            elif module_name == "dill":
-                return mock_dill
-            else:
-                raise ImportError(f"No module named '{module_name}'")
-
-        mock_import.side_effect = mock_import_side_effect
-
-        requirements = get_environment_requirements()
-
-        # Verify essential packages are included (version will be actual installed version)
-        assert "cloudpickle" in requirements
-        assert "dill" in requirements
-
-    @patch("subprocess.run")
-    def test_get_environment_info_compatibility(self, mock_run):
-        """Test get_environment_info for backward compatibility."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "numpy==1.21.0\npandas==1.3.0"
-        mock_run.return_value = mock_result
-
-        env_info = get_environment_info()
-
-        # Should return string format for compatibility
-        assert isinstance(env_info, str)
-        assert "numpy==1.21.0" in env_info
-        assert "pandas==1.3.0" in env_info
+        assert f"dill=={dill.__version__}" in listing
+        assert f"pytest=={pytest.__version__}" in listing
 
 
 class TestUvPackageManagerSupport:
-    """Test uv package manager support and integration."""
+    """Test uv package manager support and integration.
 
-    @patch("subprocess.run")
-    def test_is_uv_available_true(self, mock_run):
-        """Test detecting uv when available."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-
-        result = is_uv_available()
-
-        assert result is True
-        mock_run.assert_called_once_with(
-            ["uv", "--version"], capture_output=True, text=True, timeout=10
-        )
-
-    @patch("subprocess.run")
-    def test_is_uv_available_false_not_found(self, mock_run):
-        """Test detecting uv when not installed."""
-        mock_run.side_effect = FileNotFoundError("uv not found")
-
-        result = is_uv_available()
-
-        assert result is False
-
-    @patch("subprocess.run")
-    def test_is_uv_available_false_timeout(self, mock_run):
-        """Test detecting uv when command times out."""
-        mock_run.side_effect = subprocess.TimeoutExpired("uv", 10)
-
-        result = is_uv_available()
-
-        assert result is False
-
-    @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_uv_explicit(self, mock_uv_available):
-        """Test explicit uv configuration."""
-        config = ClusterConfig(package_manager="uv")
-
-        result = get_package_manager_command(config)
-
-        assert result == "uv pip"
-        # Should not check availability when explicitly configured
-        mock_uv_available.assert_not_called()
-
-    @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_auto_uv_available(self, mock_uv_available):
-        """Test auto-detection when uv is available."""
-        mock_uv_available.return_value = True
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-
-        assert result == "uv pip"
-        mock_uv_available.assert_called_once()
-
-    @patch("clustrix.utils.is_conda_available")
-    @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_auto_uv_unavailable(
-        self, mock_uv_available, mock_conda_available
-    ):
-        """Test auto-detection when uv is not available."""
-        mock_uv_available.return_value = False
-        mock_conda_available.return_value = False
-        config = ClusterConfig(package_manager="auto")
-
-        result = get_package_manager_command(config)
-
-        assert result == "pip"
-        mock_uv_available.assert_called_once()
-
-    def test_get_package_manager_command_pip_default(self):
-        """Test default pip configuration."""
-        config = ClusterConfig(package_manager="pip")
-
-        result = get_package_manager_command(config)
-
-        assert result == "pip"
+    Detection of uv and conda, and what ``package_manager="auto"`` makes of
+    it, is in ``tests/test_utils.py::TestPackageManager``, against real
+    programs on a real ``PATH``.
+    """
 
     def test_get_package_manager_command_unknown_fallback(self):
         """Test fallback to pip for unknown package manager."""
@@ -220,129 +92,199 @@ class TestUvPackageManagerSupport:
         assert result == "pip"
 
 
+PASSWORD = "wrong_password"
+
+PINNED = {"dill": "0.3.8", "cloudpickle": "3.0.0"}
+
+
+def _program(directory, name, body):
+    """A real program called ``name`` in ``directory``."""
+    path = directory / name
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return path
+
+
+class RemoteHost:
+    """A host reached over real SSH whose ``PATH`` holds only what is put there.
+
+    ``setup_remote_environment`` builds one shell command and runs it on the
+    far side. These tests let it: the in-process SSH server carries the
+    command, a real ``sh`` runs it, and the exit status and stderr that come
+    back are the shell's own.
+
+    What is *not* real is the software on the host. ``python3`` here creates
+    an empty ``venv/bin/activate`` instead of a virtualenv, and ``pip`` and
+    ``uv`` append their arguments to a log instead of contacting a package
+    index, because a unit test may not need the network. That makes these
+    stand-ins, kept honest by ``tests/real_world/
+    test_remote_environment_setup.py``, which runs the same calls against a
+    real host where a real pip and a real uv install into a real virtualenv.
+    """
+
+    def __init__(self, tmp_path):
+        self.root = tmp_path / "remote"
+        self.bin = self.root / "bin"
+        self.work = self.root / "job"
+        self.log = self.root / "installs.log"
+        self.bin.mkdir(parents=True)
+        self.work.mkdir()
+        self.client = None
+        self.config = None
+
+    def has_python(self):
+        _program(
+            self.bin,
+            "python3",
+            # ``python3 -m venv venv``, as far as the rest of the command can
+            # tell. mkdir by absolute path: this directory is all of PATH.
+            f"{shutil.which('mkdir')} -p \"$3/bin\" && : > \"$3/bin/activate\"",
+        )
+
+    def has_installer(self, name, behaviour="exit 0"):
+        _program(self.bin, name, f'echo "{name} $*" >> "{self.log}"\n{behaviour}')
+
+    def installs(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def setup(self, requirements, **settings):
+        for name, value in settings.items():
+            setattr(self.config, name, value)
+        return setup_remote_environment(
+            self.client, str(self.work), requirements, self.config
+        )
+
+
+@pytest.fixture
+def remote_host(tmp_path):
+    host = RemoteHost(tmp_path)
+    with LocalSSHServer(
+        root=str(host.root), password=PASSWORD, env={"PATH": str(host.bin)}
+    ) as server:
+        host.config = ClusterConfig(
+            cluster_type="ssh",
+            cluster_host=server.host,
+            cluster_port=server.port,
+            username="tester",
+            password=PASSWORD,
+            # The server's key is made per run, so it can never be known.
+            ssh_host_key_policy="auto_add",
+            remote_work_dir=str(host.root),
+            python_executable="python3",
+        )
+        connection = ConnectionManager(host.config)
+        connection.setup_ssh_connection()
+        host.client = connection.ssh_client
+        try:
+            yield host
+        finally:
+            connection.disconnect()
+
+
 class TestRemoteEnvironmentSetup:
-    """Test remote environment setup with uv support."""
+    """``setup_remote_environment``, run over SSH rather than described to a Mock."""
 
-    @patch("clustrix.utils.get_package_manager_command")
-    def test_setup_remote_environment_with_uv(self, mock_get_pkg_manager):
-        """Test remote environment setup using uv."""
-        mock_get_pkg_manager.return_value = "uv pip"
+    @pytest.mark.parametrize(
+        "on_the_host, package_manager, ran",
+        [
+            (("pip", "uv"), "uv", "uv pip install"),
+            (("pip", "uv"), "pip", "pip install --timeout=120"),
+            (("pip", "uv"), "auto", "uv pip install"),
+            (("pip",), "auto", "pip install --timeout=120"),
+        ],
+        ids=["uv-named", "pip-named", "auto-host-has-uv", "auto-host-has-no-uv"],
+    )
+    def test_the_installer_that_runs_is_the_one_configured(
+        self, remote_host, on_the_host, package_manager, ran
+    ):
+        """One install, by the right tool, of the serializers at the caller's pins.
 
-        # Mock SSH client
-        mock_ssh_client = Mock()
-        mock_sftp = Mock()
-        mock_ssh_client.open_sftp.return_value = mock_sftp
+        ``numpy`` is in the requirements and not in the command: this step
+        installs only what the job script needs in order to load the
+        function, and the old tests never looked.
+        """
+        remote_host.has_python()
+        for installer in on_the_host:
+            remote_host.has_installer(installer)
 
-        # Mock file operations
-        mock_file = Mock()
-        mock_context = Mock()
-        mock_context.__enter__ = Mock(return_value=mock_file)
-        mock_context.__exit__ = Mock(return_value=None)
-        mock_sftp.open.return_value = mock_context
-
-        # Mock command execution
-        mock_stdin = Mock()
-        mock_stdout = Mock()
-        mock_stderr = Mock()
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_ssh_client.exec_command.return_value = (
-            mock_stdin,
-            mock_stdout,
-            mock_stderr,
+        outcome = remote_host.setup(
+            {**PINNED, "numpy": "1.26.4"}, package_manager=package_manager
         )
 
-        requirements = {"numpy": "1.21.0", "pandas": "1.3.0"}
-        config = ClusterConfig(package_manager="uv")
+        assert outcome == "Environment setup completed successfully"
+        assert remote_host.installs() == [f"{ran} dill==0.3.8 cloudpickle==3.0.0"]
+        assert (remote_host.work / "venv" / "bin" / "activate").exists()
 
-        setup_remote_environment(mock_ssh_client, "/tmp/work", requirements, config)
+    def test_auto_is_decided_by_the_remote_host_not_by_this_machine(
+        self, remote_host, tmp_path, monkeypatch
+    ):
+        """uv installed here says nothing about the host the job runs on."""
+        remote_host.has_python()
+        remote_host.has_installer("pip")
+        here = tmp_path / "local-bin"
+        here.mkdir()
+        _program(here, "uv", "exit 0")
+        monkeypatch.setenv("PATH", str(here))
 
-        # Verify uv pip was used in requirements installation
-        exec_calls = mock_ssh_client.exec_command.call_args_list
-        install_command = None
-        for call in exec_calls:
-            command = call[0][0]
-            if "install" in command:
-                install_command = command
-                break
+        remote_host.setup(dict(PINNED), package_manager="auto")
 
-        assert install_command is not None
-        assert "uv pip install" in install_command
+        assert remote_host.installs() == [
+            "pip install --timeout=120 dill==0.3.8 cloudpickle==3.0.0"
+        ]
 
-    @patch("clustrix.utils.get_package_manager_command")
-    def test_setup_remote_environment_with_pip(self, mock_get_pkg_manager):
-        """Test remote environment setup using traditional pip."""
-        mock_get_pkg_manager.return_value = "pip"
+    def test_without_pins_the_serializers_are_installed_unpinned(self, remote_host):
+        remote_host.has_python()
+        remote_host.has_installer("pip")
 
-        # Mock SSH client setup
-        mock_ssh_client = Mock()
-        mock_sftp = Mock()
-        mock_ssh_client.open_sftp.return_value = mock_sftp
-        mock_file = Mock()
-        mock_context = Mock()
-        mock_context.__enter__ = Mock(return_value=mock_file)
-        mock_context.__exit__ = Mock(return_value=None)
-        mock_sftp.open.return_value = mock_context
+        remote_host.setup({"numpy": "1.26.4"}, package_manager="pip")
 
-        # Mock successful command execution
-        mock_stdin = Mock()
-        mock_stdout = Mock()
-        mock_stderr = Mock()
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_ssh_client.exec_command.return_value = (
-            mock_stdin,
-            mock_stdout,
-            mock_stderr,
+        assert remote_host.installs() == ["pip install --timeout=120 dill cloudpickle"]
+
+    def test_a_pin_that_cannot_be_installed_is_retried_unpinned(self, remote_host):
+        """Some dill beats no dill: without it the job cannot load anything."""
+        remote_host.has_python()
+        remote_host.has_installer(
+            "pip", 'case "$*" in *==*) echo "no such version" >&2; exit 1;; esac'
         )
 
-        requirements = {"requests": "2.25.1"}
-        config = ClusterConfig(package_manager="pip")
+        outcome = remote_host.setup(dict(PINNED), package_manager="pip")
 
-        setup_remote_environment(mock_ssh_client, "/tmp/work", requirements, config)
+        assert outcome == "Environment setup completed successfully"
+        assert remote_host.installs() == [
+            "pip install --timeout=120 dill==0.3.8 cloudpickle==3.0.0",
+            "pip install --timeout=120 dill cloudpickle",
+        ]
 
-        # Verify pip was used
-        exec_calls = mock_ssh_client.exec_command.call_args_list
-        install_command = None
-        for call in exec_calls:
-            command = call[0][0]
-            if "install" in command:
-                install_command = command
-                break
-
-        assert install_command is not None
-        assert "pip install" in install_command
-        assert "uv" not in install_command
-
-    def test_setup_remote_environment_failure_handling(self):
-        """Test handling of remote environment setup failures."""
-        # Mock SSH client with command failure
-        mock_ssh_client = Mock()
-        mock_sftp = Mock()
-        mock_ssh_client.open_sftp.return_value = mock_sftp
-        mock_file = Mock()
-        mock_context = Mock()
-        mock_context.__enter__ = Mock(return_value=mock_file)
-        mock_context.__exit__ = Mock(return_value=None)
-        mock_sftp.open.return_value = mock_context
-
-        # Mock failed command execution
-        mock_stdin = Mock()
-        mock_stdout = Mock()
-        mock_stderr = Mock()
-        mock_stderr.read.return_value.decode.return_value = (
-            "Package installation failed"
-        )
-        mock_stdout.channel.recv_exit_status.return_value = 1  # Failure
-        mock_ssh_client.exec_command.return_value = (
-            mock_stdin,
-            mock_stdout,
-            mock_stderr,
+    def test_an_install_that_fails_twice_raises_with_what_the_installer_said(
+        self, remote_host
+    ):
+        remote_host.has_python()
+        remote_host.has_installer(
+            "pip", 'echo "ERROR: could not reach the package index" >&2; exit 1'
         )
 
-        requirements = {"nonexistent-package": "1.0.0"}
-        config = ClusterConfig()
+        with pytest.raises(RuntimeError) as raised:
+            remote_host.setup(dict(PINNED), package_manager="pip")
 
-        with pytest.raises(RuntimeError, match="Environment setup failed"):
-            setup_remote_environment(mock_ssh_client, "/tmp/work", requirements, config)
+        message = str(raised.value)
+        assert "Environment setup failed" in message
+        assert "could not reach the package index" in message
+        assert len(remote_host.installs()) == 2
+
+    def test_a_host_with_no_python_and_no_pip_is_a_failed_setup(self, remote_host):
+        """Nothing stands in for anything here: the host's ``PATH`` is empty.
+
+        The shell's own "not found" is the reason, and it has to reach the
+        caller -- the mocked version of this test supplied both the exit
+        status and the message itself.
+        """
+        with pytest.raises(RuntimeError) as raised:
+            remote_host.setup(dict(PINNED), package_manager="pip")
+
+        message = str(raised.value)
+        assert "Environment setup failed" in message
+        assert "not found" in message
+        assert not (remote_host.work / "venv").exists()
 
 
 class TestConfigurationEnhancements:
@@ -456,16 +398,6 @@ class TestBackwardCompatibility:
         assert config.package_manager == "pip"
         assert config.replicate_local_environment is True
 
-    @patch("subprocess.run")
-    def test_environment_capture_fallback(self, mock_run):
-        """Test fallback behavior when new dependency methods fail."""
-        # Mock pip list --format=freeze failure
-        mock_run.side_effect = Exception("Command failed")
-
-        # Should not raise exception, should return empty dict
-        requirements = get_environment_requirements()
-        assert isinstance(requirements, dict)
-
     def test_package_manager_command_unknown_input(self):
         """Test graceful handling of unknown package manager configuration."""
         config = ClusterConfig(package_manager="nonexistent")
@@ -473,43 +405,3 @@ class TestBackwardCompatibility:
         # Should fallback to pip
         result = get_package_manager_command(config)
         assert result == "pip"
-
-
-class TestIntegrationScenarios:
-    """Test integration scenarios with enhanced features."""
-
-    @patch("subprocess.run")
-    @patch("clustrix.utils.is_uv_available")
-    def test_full_dependency_and_uv_workflow(self, mock_uv_available, mock_run):
-        """Test complete workflow with enhanced dependency handling and uv."""
-        # Mock uv availability
-        mock_uv_available.return_value = True
-
-        # Mock pip list --format=freeze output
-        mock_pip_result = Mock()
-        mock_pip_result.returncode = 0
-        mock_pip_result.stdout = "numpy==1.21.0\nrequests==2.25.1"
-        mock_run.return_value = mock_pip_result
-
-        # Test auto package manager selection
-        config = ClusterConfig(package_manager="auto")
-        pkg_manager = get_package_manager_command(config)
-        assert pkg_manager == "uv pip"
-
-        # Test dependency capture
-        requirements = get_environment_requirements()
-        assert "numpy" in requirements
-        assert "requests" in requirements
-
-    @patch("clustrix.utils.is_conda_available")
-    @patch("clustrix.utils.is_uv_available")
-    def test_graceful_degradation_no_uv(self, mock_uv_available, mock_conda_available):
-        """Test graceful degradation when uv is not available."""
-        mock_uv_available.return_value = False
-        mock_conda_available.return_value = False
-
-        config = ClusterConfig(package_manager="auto")
-        pkg_manager = get_package_manager_command(config)
-
-        # Should fallback to pip
-        assert pkg_manager == "pip"
