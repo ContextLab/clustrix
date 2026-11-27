@@ -226,3 +226,62 @@ class TestWhatTheUserIsTold:
         told = _save(widget, tmp_path / "quiet.yml", capsys)
 
         assert not _sentinels_in(told), told
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "PRODUCT GAP, not a test problem. Environment variables are "
+            "withheld from disk whole, exactly like a password, so they are "
+            "gone after a restart -- but the only notice of that is "
+            "ProfileManager's 'Profiles are not a credential store' warning, "
+            "and ModernClustrixWidget._save_profile suppresses it with "
+            "warnings.filterwarnings('ignore', ...). The password and token "
+            "fields are labelled 'this session only'; the environment "
+            "variables box is not, and Apply prints 'Saved to the profile'. "
+            "The same call is what tests/unit/test_no_silent_swallows.py::"
+            "test_the_lint_finds_no_unrecorded_silent_swallow reports. Remove "
+            "this marker when the form or the console says so."
+        ),
+    )
+    def test_the_user_learns_that_environment_variables_are_not_kept(self, capsys):
+        import warnings
+
+        widget = ModernClustrixWidget()
+        widget.widgets["env_vars"].value = "OMP_NUM_THREADS=4"
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            told = press(
+                lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+                widget.widgets["output"],
+                capsys,
+            )
+
+        assert pill(widget) == "applied"
+        said = " ".join(
+            [
+                told,
+                widget.widgets["env_vars"].description,
+                widget.widgets["env_vars"].placeholder,
+                *(str(w.message) for w in caught),
+            ]
+        ).lower()
+        assert "environment" in said and (
+            "session" in said or "not written" in said or "never saved" in said
+        ), said
+
+    def test_environment_variables_really_are_gone_after_a_restart(self, capsys):
+        """The fact the test above says the user is not told."""
+        from clustrix.profile_manager import ProfileManager
+
+        widget = ModernClustrixWidget()
+        widget.widgets["env_vars"].value = "OMP_NUM_THREADS=4"
+        widget._on_apply_config(widget.widgets["apply_btn"])
+        name = widget.widgets["profile_dropdown"].value
+        assert widget.profile_manager.load_profile(name).environment_variables == {
+            "OMP_NUM_THREADS": "4"
+        }
+
+        next_session = ProfileManager(str(widget.profile_manager.config_dir))
+
+        assert next_session.load_profile(name).environment_variables == {}
