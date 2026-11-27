@@ -129,6 +129,9 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
     ("config.py", "get_config_dir"),
     # A module constant naming the auto-display switch. Not a secret.
     ("notebook_magic_core.py", "auto_display_on_import"),
+    # CLUSTRIX_LOOP_WORKER, a module constant: the flag a worker process is
+    # started with so that it knows it is one. Not a secret.
+    ("loop_workers.py", "in_worker"),
     # Route 9, and gated now: ``get_cluster_password`` used to scan
     # CLUSTRIX_DEFAULT_PASSWORD and CLUSTER_PASSWORD -- variables that name
     # **no host** -- and hand what it found to whatever hostname it was
@@ -161,6 +164,8 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
 #: So literal keys are inventoried exactly as computed ones are, and the
 #: reason each is not a credential release is written next to it.
 LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST = {
+    # ``$SLURM_CPUS_PER_TASK``: how many CPUs the scheduler granted. A count.
+    ("loop_workers.py", "available_cpus"),
     # ``$EDITOR``: which program opens the credential file, not what is in
     # it.
     ("cli_credentials.py", "edit_credentials_command"),
@@ -201,6 +206,16 @@ ENVIRONMENT_BULK_READ_ALLOWLIST = {
     # the local environment being described, and #153 removed the export
     # that used to put credentials into it.
     ("file_packaging.py", "create_execution_context"),
+    # The environment a *local* worker process is started with: this
+    # process's own, as any child process inherits it. The worker runs the
+    # caller's own loop body on the caller's own machine -- the code that
+    # would otherwise run right here, with this same environment. Nothing is
+    # sent to a host, and no configuration chooses the recipient.
+    ("loop_workers.py", "_Worker.__init__"),
+    # A membership test over five thread-count variable names
+    # (OMP_NUM_THREADS and friends), to leave alone the ones the user set.
+    # No value is read.
+    ("loop_workers.py", "_threads_per_worker"),
 }
 
 #: Everything that names the credential **file**, as ``(module, enclosing

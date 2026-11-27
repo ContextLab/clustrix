@@ -3441,6 +3441,10 @@ UNRESOLVED_PROGRAM = "<program-not-a-literal>"
 RUNTIME_CHOSEN_PROGRAM_ALLOWLIST = {
     # ``sys.executable`` -- this interpreter, running pip.
     ("utils.py", "get_environment_info"),
+    # ``sys.executable`` -- this interpreter again, started as a local
+    # worker process for the chunks of a divided loop. It is handed a pipe
+    # and no host.
+    ("loop_workers.py", "_Worker.__init__"),
     # ``$EDITOR``, opening the credential file for the user to edit. It is
     # spawned with a filename and no host, and it is the user's own
     # variable rather than anything a clustrix configuration sets.

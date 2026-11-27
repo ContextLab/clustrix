@@ -114,6 +114,11 @@ ALLOWED_ENV = frozenset(
         "CLUSTRIX_AUTO_WIDGET",
         "CLUSTRIX_CONFIG_DIR",
         "CLUSTRIX_DEFAULT_PASSWORD",
+        # Set by clustrix.loop_workers in the environment of each worker
+        # process it starts, and read there so that a decorated function
+        # called from a divided loop does not start a pool inside a pool.
+        # It says what the process *is*, in production; no test sets it.
+        "CLUSTRIX_LOOP_WORKER",
         "CLUSTRIX_VALIDATION_SLURM_HOST",
         "CLUSTRIX_VALIDATION_SLURM_NAME",
         "CLUSTRIX_VALIDATION_SSH_HOST",
@@ -125,6 +130,9 @@ ALLOWED_ENV = frozenset(
         "HF_USERNAME",
         "HUGGINGFACE_TOKEN",
         "HUGGINGFACE_USERNAME",
+        # The scheduler's own statement of how many CPUs a job was granted:
+        # what sizes the local worker pool inside a SLURM job.
+        "SLURM_CPUS_PER_TASK",
         "SSH_HOST",
         "SSH_PASSWORD",
         "SSH_PORT",
