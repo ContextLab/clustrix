@@ -432,10 +432,6 @@ Connection and authentication
      - ``30``
      - Seconds paramiko waits to connect. The OS default is minutes, which
        turns an unreachable host into a hang rather than an error.
-   * - ``api_key``
-     - ``None``
-     - Stored and treated as a secret (masked in ``repr``, left out of saved
-       files). No backend reads it.
 
 ``ssh_port`` is not a field. ``configure(ssh_port=N)``,
 ``ClusterConfig(ssh_port=N)`` and an ``ssh_port`` key in an old configuration

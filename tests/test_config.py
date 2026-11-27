@@ -322,6 +322,9 @@ class TestRemovedBackendsAreExplained:
             ("cloud_region", "us-east-1", "the cloud VM backends"),
             ("cloud_auto_configure", True, "the cloud VM backends"),
             ("cost_monitoring", True, "cloud cost monitoring"),
+            # Removed for being read by nothing. Without the explanation an
+            # old file naming it is answered "did you mean key_file?".
+            ("api_key", "k", "a key that no backend ever read"),
         ],
     )
     def test_removed_setting_without_a_tracking_issue_still_explains_itself(
@@ -336,6 +339,16 @@ class TestRemovedBackendsAreExplained:
         message = str(excinfo.value)
         assert f"{setting} configured {what}, which has been removed" in message
         assert "did you mean" not in message
+
+    def test_api_key_is_not_a_setting_anywhere_it_could_be_given(self):
+        """It was a declared field that nothing in the package read."""
+        from dataclasses import fields
+
+        assert "api_key" not in {f.name for f in fields(ClusterConfig)}
+        with pytest.raises(TypeError, match="api_key"):
+            ClusterConfig(api_key="k")
+        with pytest.raises(ValueError, match="api_key configured a key"):
+            configure(api_key="k")
 
     def test_a_genuine_typo_still_gets_the_did_you_mean_hint(self, tmp_path):
         """The removed-setting path must not have swallowed the typo hint."""

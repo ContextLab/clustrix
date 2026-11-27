@@ -65,7 +65,6 @@ def secret_bearing_config():
         cluster_host="cluster.example.edu",
         username="researcher",
         password="fake-password-for-this-test",
-        api_key="sk-fake-key-abcdef123456",
         hf_token="hf_thisisasecrettoken",  # nosec
     )
 
@@ -127,7 +126,7 @@ def test_save_to_file_include_secrets_true_writes_plaintext(
 
     raw_text = config_path.read_text()
     assert "fake-password-for-this-test" in raw_text
-    assert "sk-fake-key-abcdef123456" in raw_text
+    assert "hf_thisisasecrettoken" in raw_text
 
     # Even with secrets included, the mode must still be 0600 -- opting into
     # writing secrets must never also opt into a wider file mode.
@@ -147,7 +146,6 @@ def test_load_from_file_round_trips_after_default_save(tmp_path, secret_bearing_
     assert reloaded.cluster_host == "cluster.example.edu"
     assert reloaded.username == "researcher"
     assert reloaded.password is None
-    assert reloaded.api_key is None
     assert reloaded.hf_token is None
 
 
@@ -210,9 +208,9 @@ def test_secret_fields_derived_from_dataclass_covers_known_credential_names():
     # Those fields went with the cloud backends (issues #143-#146); the
     # patterns that classified them are still in _SECRET_FIELD_PATTERN, so
     # the derivation is unchanged -- there is simply nothing left to name.
+    # ``api_key`` went the same way: no backend ever read it.
     for expected in (
         "password",
-        "api_key",
         "hf_token",
     ):
         assert expected in SECRET_FIELDS, (
@@ -324,7 +322,6 @@ def test_repr_masks_credentials_but_keeps_ordinary_fields():
         username="researcher",
         password="fake-password-value",
         hf_token="fake-hf-token-value",
-        api_key="sk-fake-api-value",
         environment_variables={
             "OMP_NUM_THREADS": "8",
             "AWS_SECRET_ACCESS_KEY": "fake-aws-value",
@@ -336,7 +333,6 @@ def test_repr_masks_credentials_but_keeps_ordinary_fields():
     for secret in (
         "fake-password-value",
         "fake-hf-token-value",
-        "sk-fake-api-value",
         "fake-aws-value",
     ):
         assert secret not in rendered, f"{secret!r} leaked through repr()"

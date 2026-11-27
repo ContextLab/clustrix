@@ -78,7 +78,6 @@ class ClusterConfig:
     """Configuration settings for cluster execution."""
 
     # Authentication
-    api_key: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
     key_file: Optional[str] = None
@@ -500,6 +499,8 @@ _REMOVED_SETTINGS = (
     ("cloud_auto_configure", "the cloud VM backends", None),
     ("cost_monitoring", "cloud cost monitoring", None),
     ("hf_sdk", "the HuggingFace Spaces SDK", None),
+    # Not a backend's: a secret-bearing field that no code path ever read.
+    ("api_key", "a key that no backend ever read", None),
 )
 
 
@@ -2532,10 +2533,11 @@ def _reset_default_config_lock_after_fork() -> None:
     ``_default_config_loading = True`` for the same reason, set by that same
     absent thread.
 
-    This is not hypothetical for this package: ``LocalExecutor`` runs work in a
-    ``ProcessPoolExecutor``, and ``fork`` is a real start method (the default
-    on Linux). A worker whose first act is to read the configuration would
-    hang rather than fail.
+    This is not hypothetical: ``fork`` is a real start method (the default on
+    Linux before Python 3.14), and a user's own ``multiprocessing`` pool or
+    ``os.fork()`` in a process that has imported clustrix is enough. A child
+    whose first act is to read the configuration would hang rather than fail.
+    (clustrix's own loop workers are plain subprocesses and inherit nothing.)
 
     A forked child is single-threaded at this point, so nothing can be
     contending: replacing the lock outright is safe, and it is the only

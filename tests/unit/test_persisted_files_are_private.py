@@ -132,12 +132,13 @@ PEM_SENTINEL = (
 SENTINELS = {
     # Declared credential fields.
     "password": _awkward_sentinel("password"),
-    "api_key": _sentinel("apikey"),
     "hf_token": _sentinel("hftoken"),
     # Keys that are not ClusterConfig fields, which is how they once
     # reached disk verbatim: a writer that carries whatever a previously
     # saved file contained hands strip_secret_fields names it has never
-    # heard of.
+    # heard of. ``api_key`` was a field until it was removed for being read
+    # by nothing; a file saved before then can still carry one.
+    "api_key": _sentinel("apikey"),
     "aws_secret_access_key": _sentinel("aws"),
     "client_secret": _sentinel("clientsecret"),
     "private_key": PEM_SENTINEL,
@@ -321,7 +322,6 @@ def _a_config():
         cluster_host="cluster.example.edu",
         username="researcher",
         password=SENTINELS["password"],
-        api_key=SENTINELS["api_key"],
         hf_token=SENTINELS["hf_token"],
         environment_variables=dict(SENTINEL_ENVIRONMENT),
     )
@@ -668,7 +668,7 @@ def test_the_sentinels_really_were_planted(private_tree, monkeypatch):
 
     # The opt-in file is the whole config, so every ClusterConfig-borne
     # sentinel has to be in it.
-    expected = {"password", "api_key", "hf_token"} | set(SENTINEL_ENVIRONMENT) - {
+    expected = {"password", "hf_token"} | set(SENTINEL_ENVIRONMENT) - {
         "OMP_NUM_THREADS"
     }
     assert expected <= planted, sorted(expected - planted)

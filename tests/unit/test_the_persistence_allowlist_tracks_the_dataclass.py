@@ -184,7 +184,7 @@ def test_the_declared_names_really_are_the_dataclass():
 
 def test_the_credential_fields_are_still_classified_as_secret():
     """The exemptions must not have swallowed the thing they sit next to."""
-    assert {"password", "api_key", "hf_token"} <= SECRET_FIELDS
+    assert {"password", "hf_token"} <= SECRET_FIELDS
     assert SECRET_FIELDS <= FIELD_NAMES
 
 

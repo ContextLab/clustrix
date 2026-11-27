@@ -72,13 +72,15 @@ def _status_summary(config) -> str:
     ``cluster_type``: with no ``cluster_host`` an ``ssh`` or ``slurm``
     configuration runs the function in this process, and reporting
     ``slurm`` for it described a cluster nothing would be sent to. The
-    decision is the decorator's own, asked for rather than restated.
+    decision is the decorator's own, asked for rather than restated; it
+    depends on the configuration alone, so the function and arguments it is
+    also handed are placeholders.
     """
     from .decorator import _choose_execution_mode
 
     if config.cluster_type == "local":
         backend = "local"
-    elif _choose_execution_mode(config, None, (), {}) == "remote":
+    elif _choose_execution_mode(config, _status_summary, (), {}) == "remote":
         backend = config.cluster_type
     else:
         why = (
