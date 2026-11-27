@@ -4,9 +4,9 @@ import os
 import tempfile
 import pytest
 from pathlib import Path
-from unittest.mock import patch
 
 from clustrix.credential_manager import (
+    PROVIDER_ENV_NAMES,
     FlexibleCredentialManager,
     DotEnvCredentialSource,
     EnvironmentCredentialSource,
@@ -16,6 +16,36 @@ from clustrix.credential_manager import (
 from clustrix.config import get_config_dir
 import clustrix.credential_manager as credential_manager_module
 from clustrix.credential_release import describe_credential
+
+#: Every variable a credential source reads, plus the ones the removed
+#: backends used to read. Taken out of the environment before each test, so
+#: a value a test finds can only be one that test put there -- on a
+#: developer's machine and in CI, where GITHUB_ACTIONS and HF_TOKEN are set.
+CREDENTIAL_VARIABLES = sorted(
+    {
+        name
+        for fields in PROVIDER_ENV_NAMES.values()
+        for names in fields.values()
+        for name in names
+    }
+    | {
+        "GITHUB_ACTIONS",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_ACCESS_KEY",
+        "KUBECONFIG",
+        "LAMBDA_CLOUD_API_KEY",
+        "GCP_PROJECT_ID",
+        "GCP_JSON",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_credentials(monkeypatch):
+    """Real environment variables, really removed for the test's duration."""
+    for name in CREDENTIAL_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
 
 
 class TestDotEnvCredentialSource:
@@ -48,13 +78,12 @@ class TestDotEnvCredentialSource:
         try:
             # Clear the environment first so the values can only have come
             # from parsing the file on disk, not from the ambient shell.
-            with patch.dict(os.environ, {}, clear=True):
-                source = DotEnvCredentialSource(env_path)
-                creds = source.get_credentials("huggingface")
+            source = DotEnvCredentialSource(env_path)
+            creds = source.get_credentials("huggingface")
 
-                assert creds is not None
-                assert creds["token"] == "hf_test_token"
-                assert creds["username"] == "test-user"
+            assert creds is not None
+            assert creds["token"] == "hf_test_token"
+            assert creds["username"] == "test-user"
         finally:
             env_path.unlink()
 
@@ -67,14 +96,13 @@ class TestDotEnvCredentialSource:
             env_path = Path(f.name)
 
         try:
-            with patch.dict(os.environ, {}, clear=True):
-                source = DotEnvCredentialSource(env_path)
-                creds = source.get_credentials("ssh")
+            source = DotEnvCredentialSource(env_path)
+            creds = source.get_credentials("ssh")
 
-                assert creds is not None
-                assert creds["host"] == "cluster.example.edu"
-                assert creds["username"] == "researcher"
-                assert creds["port"] == "2222"
+            assert creds is not None
+            assert creds["host"] == "cluster.example.edu"
+            assert creds["username"] == "researcher"
+            assert creds["port"] == "2222"
         finally:
             env_path.unlink()
 
@@ -122,17 +150,12 @@ class TestEnvironmentCredentialSource:
         source = EnvironmentCredentialSource()
         assert source.is_available()
 
-    @patch.dict(
-        os.environ,
-        {
-            "SSH_HOST": "test.example.com",
-            "SSH_USERNAME": "testuser",
-            "SSH_PASSWORD": "testpass",
-            "SSH_PORT": "22",
-        },
-    )
-    def test_get_ssh_credentials(self):
+    def test_get_ssh_credentials(self, monkeypatch):
         """Test getting SSH credentials from environment."""
+        monkeypatch.setenv("SSH_HOST", "test.example.com")
+        monkeypatch.setenv("SSH_USERNAME", "testuser")
+        monkeypatch.setenv("SSH_PASSWORD", "testpass")
+        monkeypatch.setenv("SSH_PORT", "22")
         source = EnvironmentCredentialSource()
         creds = source.get_credentials("ssh")
 
@@ -156,37 +179,31 @@ class TestEnvironmentCredentialSource:
         port now applies only to a credential set that already holds
         something real.
         """
-        with patch.dict(os.environ, {}, clear=True):
-            source = EnvironmentCredentialSource()
+        source = EnvironmentCredentialSource()
 
-            assert source.get_credentials("ssh") is None
+        assert source.get_credentials("ssh") is None
 
-            # HuggingFace has no defaults, so with nothing in the environment
-            # every field filters out and the whole provider returns None.
-            hf_creds = source.get_credentials("huggingface")
-            assert hf_creds is None
+        # HuggingFace has no defaults, so with nothing in the environment
+        # every field filters out and the whole provider returns None.
+        hf_creds = source.get_credentials("huggingface")
+        assert hf_creds is None
 
-    def test_the_default_port_still_applies_to_a_real_credential(self):
+    def test_the_default_port_still_applies_to_a_real_credential(self, monkeypatch):
         """The default must not have been removed, only narrowed."""
-        with patch.dict(os.environ, {"SSH_HOST": "cluster.example.edu"}, clear=True):
-            creds = EnvironmentCredentialSource().get_credentials("ssh")
+        monkeypatch.setenv("SSH_HOST", "cluster.example.edu")
+        creds = EnvironmentCredentialSource().get_credentials("ssh")
 
         assert creds == {"host": "cluster.example.edu", "port": "22"}
 
-    @patch.dict(
-        os.environ,
-        {
-            "AWS_ACCESS_KEY_ID": "test_key",
-            "AWS_SECRET_ACCESS_KEY": "test_secret",
-            "KUBECONFIG": "/tmp/kubeconfig",
-            "LAMBDA_CLOUD_API_KEY": "test_key",
-        },
-    )
     @pytest.mark.parametrize(
         "provider", ["aws", "azure", "gcp", "kubernetes", "lambda_cloud"]
     )
-    def test_removed_backends_have_no_credentials(self, provider):
+    def test_removed_backends_have_no_credentials(self, monkeypatch, provider):
         """Deleted backends resolve to nothing even with their env vars set."""
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test_key")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test_secret")
+        monkeypatch.setenv("KUBECONFIG", "/tmp/kubeconfig")
+        monkeypatch.setenv("LAMBDA_CLOUD_API_KEY", "test_key")
         source = EnvironmentCredentialSource()
         assert source.get_credentials(provider) is None
 
@@ -194,28 +211,22 @@ class TestEnvironmentCredentialSource:
 class TestGitHubActionsCredentialSource:
     """Test GitHubActionsCredentialSource functionality."""
 
-    @patch.dict(os.environ, {"GITHUB_ACTIONS": "true"})
-    def test_is_available_in_github_actions(self):
+    def test_is_available_in_github_actions(self, monkeypatch):
         """Test that source is available in GitHub Actions."""
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
         source = GitHubActionsCredentialSource()
         assert source.is_available()
 
     def test_is_available_outside_github_actions(self):
         """Test that source is not available outside GitHub Actions."""
-        with patch.dict(os.environ, {}, clear=True):
-            source = GitHubActionsCredentialSource()
-            assert not source.is_available()
+        source = GitHubActionsCredentialSource()
+        assert not source.is_available()
 
-    @patch.dict(
-        os.environ,
-        {
-            "GITHUB_ACTIONS": "true",
-            "HF_TOKEN": "hf_gh_token",
-            "HF_USERNAME": "gh-user",
-        },
-    )
-    def test_get_huggingface_credentials(self):
+    def test_get_huggingface_credentials(self, monkeypatch):
         """Test getting HuggingFace credentials in GitHub Actions."""
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("HF_TOKEN", "hf_gh_token")
+        monkeypatch.setenv("HF_USERNAME", "gh-user")
         source = GitHubActionsCredentialSource()
         creds = source.get_credentials("huggingface")
 
@@ -223,19 +234,14 @@ class TestGitHubActionsCredentialSource:
         assert creds["token"] == "hf_gh_token"
         assert creds["username"] == "gh-user"
 
-    @patch.dict(
-        os.environ,
-        {
-            "GITHUB_ACTIONS": "true",
-            "AWS_ACCESS_KEY_ID": "gh_key",
-            "AWS_ACCESS_KEY": "gh_secret",
-            "GCP_PROJECT_ID": "gh-project",
-            "GCP_JSON": "{}",
-        },
-    )
     @pytest.mark.parametrize("provider", ["aws", "gcp"])
-    def test_removed_backends_have_no_credentials(self, provider):
+    def test_removed_backends_have_no_credentials(self, monkeypatch, provider):
         """GitHub Actions secrets for deleted backends are no longer honored."""
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "gh_key")
+        monkeypatch.setenv("AWS_ACCESS_KEY", "gh_secret")
+        monkeypatch.setenv("GCP_PROJECT_ID", "gh-project")
+        monkeypatch.setenv("GCP_JSON", "{}")
         source = GitHubActionsCredentialSource()
         assert source.get_credentials(provider) is None
         assert source.list_available_providers() == []
@@ -289,7 +295,7 @@ class TestFlexibleCredentialManager:
                     manager.env_file.stat().st_mode & 0o777 == 0o600
                 )  # Secure permissions
 
-    def test_credential_retrieval_success(self):
+    def test_credential_retrieval_success(self, monkeypatch):
         """Successful retrieval, asked for the way callers must now ask.
 
         ``ensure_credential`` was public and took no recipient; it is
@@ -308,25 +314,22 @@ class TestFlexibleCredentialManager:
                 "SSH_HOST=cluster.example.edu\nSSH_USERNAME=researcher\n"
             )
 
-            with patch.dict(
-                os.environ, {"CLUSTRIX_CONFIG_DIR": str(config_dir)}, clear=True
-            ):
-                credential_manager_module._credential_manager = None
-                described = describe_credential("ssh")
+            monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(config_dir))
+            credential_manager_module._credential_manager = None
+            described = describe_credential("ssh")
 
-                assert described.available
-                assert described.host == "cluster.example.edu"
-                assert described.username == "researcher"
+            assert described.available
+            assert described.host == "cluster.example.edu"
+            assert described.username == "researcher"
 
     def test_credential_retrieval_not_found(self):
         """Test credential retrieval when credentials don't exist."""
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)
 
-            with patch.dict(os.environ, {}, clear=True):
-                manager = FlexibleCredentialManager(config_dir)
+            manager = FlexibleCredentialManager(config_dir)
 
-                assert manager._configured_fields("nonexistent") == (None, [])
+            assert manager._configured_fields("nonexistent") == (None, [])
 
     def test_the_store_refuses_a_caller_that_is_not_the_gate(self):
         """Lock 3, live rather than decorative.
