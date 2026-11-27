@@ -6,6 +6,7 @@ for jobs run directly over SSH.
 
 import os
 import shlex
+import signal
 import time
 import tempfile
 import dill
@@ -16,6 +17,51 @@ from typing import Dict, Any, Optional
 from .utils import verify_signed_payload
 
 logger = logging.getLogger(__name__)
+
+
+class RemoteTraceback(Exception):
+    """The traceback of an exception raised on the worker, as text.
+
+    A traceback object cannot cross to another process, so the worker ships
+    its formatted text and the exception re-raised here carries it as
+    ``__cause__``. Python then prints it above the local traceback, which is
+    the only way the line of the user's function that actually failed reaches
+    them: the local traceback ends inside clustrix.
+    """
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.text = text
+
+    def __str__(self) -> str:
+        return "\n" + self.text
+
+
+def describe_exit_status(status: str) -> str:
+    """Say what a recorded exit status means, where it means something.
+
+    Statuses above 128 are how a shell reports "killed by signal N", and
+    ``137`` on its own tells nobody that the kernel's out-of-memory killer is
+    the likeliest culprit.
+    """
+    if not status.isdigit():
+        return f"exit status {status}"
+    code = int(status)
+    if code <= 128:
+        return f"exit status {code}"
+    number = code - 128
+    try:
+        name = signal.Signals(number).name
+    except ValueError:
+        name = f"signal {number}"
+    text = f"exit status {code}: killed by {name}"
+    if name == "SIGKILL":
+        text += (
+            ". Nothing in the job asks for that; when the function did not "
+            "do it to itself, the usual cause is the kernel's out-of-memory "
+            "killer or an administrator"
+        )
+    return text
 
 
 class SchedulerStatusManager:
@@ -93,59 +139,79 @@ class SchedulerStatusManager:
             return self._check_slurm_job_status_robust(job_id, active_jobs)
 
         elif self.config.cluster_type == "ssh":
-            # For SSH jobs, check if result file exists
-            if job_id in active_jobs:
-                job_info = active_jobs[job_id]
-                result_exists = self.connection_manager.remote_file_exists(
-                    f"{job_info['remote_dir']}/result.pkl"
-                )
-                error_exists = self.connection_manager.remote_file_exists(
-                    f"{job_info['remote_dir']}/job.err"
-                )
-
-                if result_exists:
-                    return "completed"
-                elif error_exists:
-                    # Check if error file has content indicating failure.
-                    # Measurability is gated on `test -f` rather than trusted
-                    # to wc: a job.err that is actually a *directory* defeats
-                    # every spelling of wc on Linux -- GNU wc reads what it
-                    # can through a stdin redirect and answers 0, which read
-                    # as "the error file holds nothing, keep waiting". The
-                    # gate makes an unmeasurable job.err land in the except
-                    # below on every platform.
-                    try:
-                        stdout, _ = self.connection_manager.execute_remote_command(
-                            f"if test -f {job_info['remote_dir']}/job.err; "
-                            f"then wc -l < {job_info['remote_dir']}/job.err; fi"
-                        )
-                        line_count = int(stdout.strip())
-                    except Exception as exc:
-                        # This used to answer "running". It is not: the job
-                        # wrote an error file, and the only thing that failed
-                        # is our attempt to measure it. Reporting "running"
-                        # sent wait_for_result back around the poll loop until
-                        # job_wait_timeout expired, and the TimeoutError then
-                        # blamed a job that had already stopped. "unknown" is
-                        # the honest answer and is already a documented member
-                        # of this function's return set.
-                        logger.warning(
-                            "Job %s: could not measure %s/job.err (%s). Job "
-                            "status is unknown -- it is NOT known to be "
-                            "running.",
-                            job_id,
-                            job_info["remote_dir"],
-                            exc,
-                        )
-                        return "unknown"
-                    if line_count > 0:
-                        return "failed"
-                    return "running"
-                else:
-                    return "running"
-            else:
+            if job_id not in active_jobs:
                 return "completed"
+            return self._check_ssh_job_status(job_id, active_jobs[job_id])
 
+        return "unknown"
+
+    def _probe_ssh_job(self, job_info: Dict[str, Any]) -> str:
+        """Ask the remote host how a directly-run job stands, in one command.
+
+        Answers ``exit <status>`` once the wrapper has recorded how job.sh
+        ended, ``running`` while the wrapper process is alive, and ``gone``
+        when it is neither: the process no longer exists and it never wrote
+        an exit status, which is what a killed wrapper or a rebooted host
+        leaves behind. The exit record is looked for again after the
+        liveness test, because the wrapper writes it and then exits -- a
+        single look can land between the two and report a finished job as
+        gone.
+        """
+        quoted_dir = shlex.quote(job_info["remote_dir"])
+        pid = int(job_info["pid"])
+        stdout, _ = self.connection_manager.execute_remote_command(
+            f"cd {quoted_dir} || exit 1; "
+            'if [ -f job.exit ]; then echo "exit $(cat job.exit)"; '
+            f"elif kill -0 {pid} 2>/dev/null; then echo running; "
+            'elif sleep 1; [ -f job.exit ]; then echo "exit $(cat job.exit)"; '
+            "else echo gone; fi",
+            check=True,
+        )
+        return stdout.strip()
+
+    def _check_ssh_job_status(self, job_id: str, job_info: Dict[str, Any]) -> str:
+        """Status of a job run directly over SSH, from its recorded exit status.
+
+        This used to be inferred from files: ``result.pkl`` present meant
+        completed, a non-empty ``job.err`` meant failed, anything else meant
+        running. All three inferences were wrong somewhere. A function that
+        printed one warning to stderr was reported failed while it was still
+        running; a function that was killed, or called ``sys.exit``, wrote
+        neither file and was reported running until ``job_wait_timeout``; and
+        ``result.pkl`` exists a moment before its signature does, so a prompt
+        poll fetched a result it then refused as unsigned.
+
+        A job submitted before the exit status was recorded has no ``pid``
+        here and cannot be measured this way; that is ``"unknown"``, not a
+        guess.
+        """
+        if "pid" not in job_info:
+            return "unknown"
+        answer = self._probe_ssh_job(job_info)
+        if answer == "running":
+            return "running"
+        if answer == "exit 0":
+            if self.connection_manager.remote_file_exists(
+                f"{job_info['remote_dir']}/result.pkl"
+            ):
+                return "completed"
+            # Exit status 0 and no result: the script was cut short in a way
+            # that still reported success (a pre-execution command that
+            # called `exit 0`, say). There is nothing to fetch, so it failed.
+            job_info["exit_status"] = "0, but it wrote no result"
+            return "failed"
+        if answer.startswith("exit "):
+            job_info["exit_status"] = answer[len("exit ") :].strip()
+            return "failed"
+        if answer == "gone":
+            job_info["exit_status"] = "unrecorded: its process is gone"
+            return "failed"
+        logger.warning(
+            "Job %s: the status probe answered %r, which is not an answer. "
+            "Job status is unknown -- it is NOT known to be running.",
+            job_id,
+            answer,
+        )
         return "unknown"
 
     def _check_slurm_job_status_robust(
@@ -185,8 +251,10 @@ class SchedulerStatusManager:
                     "NODE_FAIL",
                     "PREEMPTED",
                 ]:
+                    if job_id in active_jobs:
+                        active_jobs[job_id]["scheduler_state"] = slurm_status
                     return "failed"
-                elif slurm_status in ["RUNNING", "CONFIGURING"]:
+                elif slurm_status in ["RUNNING", "CONFIGURING", "COMPLETING"]:
                     return "running"
                 elif slurm_status in ["PENDING", "RESIZING", "REQUEUED"]:
                     return "queued"
@@ -215,7 +283,9 @@ class SchedulerStatusManager:
                 return "running"
             if any(state.startswith(f) for f in self._TERMINAL_FAILURE_STATES):
                 reason = self._get_scheduler_failure_reason(job_id)
-                logger.error(f"Job {job_id} {reason or 'failed'}")
+                logger.info(f"Job {job_id} {reason or 'failed'}")
+                if job_id in active_jobs:
+                    active_jobs[job_id]["scheduler_state"] = state
                 return "failed"
             # COMPLETED, or a state we do not recognise: fall through to the
             # file probe, which distinguishes a real result from a job that
@@ -487,6 +557,28 @@ class SchedulerStatusManager:
             )
         return detail
 
+    def failure_summary(self, job_id: str, active_jobs: Dict[str, Any]) -> str:
+        """One clause saying how a failed job ended, or ``""`` if unknown.
+
+        For the failures that leave no error report behind -- a job that was
+        killed, cancelled, ran out of time or called ``sys.exit`` -- this is
+        the whole of what clustrix knows, and it used to be dropped: the
+        caller got "Job failed" above whatever happened to be on stderr.
+        """
+        job_info = active_jobs.get(job_id) or {}
+        if "exit_status" in job_info:
+            return (
+                f" ({describe_exit_status(str(job_info['exit_status']))}, and it "
+                "left no error report -- the function did not raise; it exited "
+                "or was stopped)"
+            )
+        accounting = self._get_scheduler_failure_reason(job_id)
+        if accounting:
+            return f" ({accounting})"
+        if job_info.get("scheduler_state"):
+            return f" (SLURM state {job_info['scheduler_state']})"
+        return ""
+
     def _authenticated_error_payload(
         self, job_id: str, job_info: Dict[str, Any]
     ) -> Optional[bytes]:
@@ -623,7 +715,7 @@ class SchedulerStatusManager:
                 )
 
         # Fallback to text error files
-        error_files = ["job.err", "slurm-*.out"]
+        error_files = ["job.err", "slurm-*.err", "slurm-*.out", "job.out"]
 
         unreadable = []
         for error_file in error_files:
@@ -738,6 +830,10 @@ class SchedulerStatusManager:
                     # loses the type, so `except ValueError` would not fire.
                     original = error_data.get("exception")
                     if isinstance(original, Exception):
+                        if error_data.get("traceback"):
+                            original.__cause__ = RemoteTraceback(
+                                str(error_data["traceback"])
+                            )
                         return original
                     if "error" in error_data:
                         return RuntimeError(error_data["error"])

@@ -97,7 +97,12 @@ conda() {
 
 SBATCH = """\
 #!/bin/sh
-echo "Submitted batch job 4242"
+# What real sbatch prints, checked against SLURM 23.11: the bare job id under
+# --parsable, which is how clustrix calls it, and the sentence otherwise.
+case " $* " in
+  *" --parsable "*) echo "4242" ;;
+  *) echo "Submitted batch job 4242" ;;
+esac
 """
 
 #: Stands in for a GPU. ``detect_gpu_capabilities`` asks for exactly this --
@@ -577,7 +582,7 @@ def test_the_invariant_does_not_depend_on_where_the_step_2_comment_sits(
         if line.startswith("# Step 2: Use VENV2 to execute the function")
     )
     activation = next(
-        line for line in lines if line.endswith("/venv1_serialization/bin/activate")
+        line for line in lines if "/venv1_serialization/bin/activate" in line
     )
     lines.insert(marker, activation)
     with pytest.raises(AssertionError, match="activates VENV1"):

@@ -206,10 +206,18 @@ class TestValidatedSites:
     def test_an_ordinary_module_name_still_works(self):
         config = ClusterConfig(module_loads=["python/3.9", "cuda/11.2"])
 
-        assert environment_setup_lines(config) == [
+        # Each load used to be asserted as the bare `module load <name>`.
+        # Run for real, that line was "module: command not found" in every
+        # job clustrix submits -- an SSH exec channel is not a login shell --
+        # and the script carried on without the module. So the function is
+        # defined first where it is missing, and a failed load stops the job.
+        lines = environment_setup_lines(config)
+        assert lines[0].startswith("if ! type module >/dev/null 2>&1; then")
+        assert [line.split(" || ")[0] for line in lines[1:]] == [
             "module load python/3.9",
             "module load cuda/11.2",
         ]
+        assert all(line.rstrip().endswith("exit 1; }") for line in lines[1:])
 
     def test_environment_variable_name_that_is_not_an_identifier_is_refused(self):
         config = ClusterConfig(

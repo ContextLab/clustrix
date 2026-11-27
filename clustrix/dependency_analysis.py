@@ -446,8 +446,6 @@ class LoopAnalyzer:
                     for arg in node.iter.args:
                         if isinstance(arg, ast.Constant):
                             args.append(str(arg.value))
-                        elif isinstance(arg, ast.Num):  # Python 3.8 compatibility
-                            args.append(str(arg.n))
                         else:
                             args.append("...")
                     iter_str = f"{func_name}({', '.join(args)})"

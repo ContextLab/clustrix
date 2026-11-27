@@ -5,10 +5,12 @@ import hmac
 import logging
 import contextlib
 import os
+import posixpath
 import re
 import shlex
 import threading
 import sys
+import textwrap
 import pickle
 import inspect
 import importlib
@@ -452,7 +454,9 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
     """
 
     try:
-        source = inspect.getsource(func)
+        # Dedented: getsource() returns a nested function or a method with
+        # the indentation it has in the file, which ast.parse() refuses.
+        source = textwrap.dedent(inspect.getsource(func))
         tree = ast.parse(source)
 
         class LoopVisitor(ast.NodeVisitor):
@@ -1709,6 +1713,10 @@ def _environment_key(
 #: every later job with the same requirements "reused" it and skipped setup.
 _ENV_READY_MARKER = ".clustrix_ready"
 
+#: Printed by the virtualenv build script when it found a finished environment
+#: and built nothing.
+_ENV_REUSED_SENTINEL = "clustrix-environment-reused"
+
 
 def _parse_conda_env_paths(listing: str) -> Dict[str, str]:
     """Map environment name -> prefix path from ``conda env list`` output."""
@@ -1833,6 +1841,231 @@ def _write_remote_text(ssh_client, remote_path: str, content: str) -> None:
         sftp.close()
 
 
+def _module_load_prefix(config: Optional[ClusterConfig]) -> str:
+    """``module load`` commands to run ahead of anything that needs Python.
+
+    On a cluster without conda the interpreter usually comes from a module, so
+    a probe or an environment build that ignores ``module_loads`` looks for
+    Python in a shell that does not have it yet -- and the job script, which
+    does load the modules, then runs against an environment built without
+    them. Only the module loads are replayed here: ``pre_execution_commands``
+    are the user's own per-job commands and are not safe to run twice.
+    """
+    return "".join(f"{line}; " for line in module_load_lines(config))
+
+
+def _probe_remote_pythons(
+    ssh_client, candidates: List[str], config: Optional[ClusterConfig]
+) -> List[Tuple[str, str]]:
+    """``(command, "major.minor")`` for each candidate that runs remotely.
+
+    One round trip for the whole list rather than one per candidate, in the
+    same module environment the job will have.
+    """
+    program = _module_load_prefix(config) + (
+        "for _p in "
+        + " ".join(shlex.quote(c) for c in candidates)
+        + '; do _v=$("$_p" -c "import sys; '
+        "print('%d.%d' % sys.version_info[:2])\" 2>/dev/null) "
+        '&& echo "$_p $_v"; done; true'
+    )
+    stdin, stdout, stderr = ssh_client.exec_command(program)
+    listing = stdout.read().decode()
+    if stdout.channel.recv_exit_status() != 0:
+        # Only a failed module load ends this program early. Carrying on
+        # would report "no Python on the remote system", which is a claim
+        # about a machine whose Python was never looked for.
+        raise RuntimeError(
+            "Could not look for Python on the remote host: "
+            + (stderr.read().decode().strip() or "the probe exited early")
+        )
+    probed: List[Tuple[str, str]] = []
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and re.fullmatch(r"3\.\d+", fields[1]):
+            probed.append((fields[0], fields[1]))
+    return probed
+
+
+def _remote_has_uv(ssh_client, config: Optional[ClusterConfig]) -> bool:
+    """Whether ``uv`` is a command on the remote host.
+
+    ``package_manager`` describes how the *remote* environment is built, so
+    this asks the remote host. Asking the submitting machine -- as
+    ``is_uv_available`` does, for local use -- answered a different question.
+    """
+    stdin, stdout, stderr = ssh_client.exec_command(
+        _module_load_prefix(config) + "command -v uv"
+    )
+    return bool(stdout.read().decode().strip())
+
+
+def _virtualenv_cache_root(work_dir: str, env_key: str) -> str:
+    """Where the shared virtualenv pair for ``env_key`` lives.
+
+    Beside the job directories rather than inside one. Built inside the job
+    directory, every submission created two virtualenvs and reinstalled the
+    whole environment into them before any user code ran, and
+    ``cleanup_on_success`` then deleted them.
+    """
+    return f"{posixpath.dirname(work_dir.rstrip('/'))}/envs/{env_key}"
+
+
+def _build_virtualenv_pair(
+    ssh_client,
+    work_dir: str,
+    python_cmd: str,
+    env_root: str,
+    requirements: Dict[str, str],
+    config: ClusterConfig,
+) -> bool:
+    """Build -- or reuse -- the two virtualenvs under ``env_root``.
+
+    The build runs as one script under an exclusive lock, so five jobs
+    submitted together build the environment once and the other four wait for
+    it instead of each writing into the same directory. The lock is taken by
+    the remote Python itself (``flock`` on an inherited descriptor), which
+    needs nothing installed beyond the interpreter the environment is being
+    built from, and is released by the kernel if the build dies.
+
+    A marker file is written last. Its presence, not the directory's, is what
+    says the environment is usable: a build that failed half way leaves no
+    marker and is rebuilt from scratch by the next job.
+
+    Returns:
+        True when an existing environment was reused, False when it was built.
+    """
+    manager = getattr(config, "package_manager", "pip") or "pip"
+    if manager == "conda":
+        raise RuntimeError(
+            "package_manager is 'conda', but no conda installation was found "
+            "on the remote host. Put what makes conda available in "
+            "module_loads, or set package_manager to 'pip', 'uv' or 'auto'."
+        )
+    use_uv = manager == "uv" or (
+        manager == "auto" and _remote_has_uv(ssh_client, config)
+    )
+    if manager == "uv" and not _remote_has_uv(ssh_client, config):
+        raise RuntimeError(
+            "package_manager is 'uv', but uv is not installed on the remote "
+            "host. Install it there, or set package_manager to 'pip' or 'auto'."
+        )
+
+    venv1 = f"{env_root}/venv1_serialization"
+    venv2 = f"{env_root}/venv2_execution"
+    python = shlex.quote(python_cmd)
+
+    def create(venv: str) -> str:
+        if use_uv:
+            # --seed: post-install commands and the user's own function may
+            # reasonably expect `pip` to exist inside an activated venv.
+            return f"uv venv --seed --python {python} {shlex.quote(venv)}"
+        return f"{python} -m venv {shlex.quote(venv)}"
+
+    def install(venv: str, what: str, timeout: Any = 300) -> str:
+        interpreter = f"{shlex.quote(venv)}/bin/python"
+        if use_uv:
+            return f"uv pip install --python {interpreter} {what}"
+        return f"{interpreter} -m pip install --timeout={timeout} {what}"
+
+    def pinned(package: str) -> str:
+        version = requirements.get(package)
+        return shlex.quote(f"{package}=={version}" if version else package)
+
+    serializers = " ".join(pinned(pkg) for pkg in _ESSENTIAL_PACKAGES)
+    lines = [
+        "set -e",
+        _module_load_prefix(config).strip(),
+        f"mkdir -p {shlex.quote(env_root)}",
+        f"exec 9>{shlex.quote(env_root + '/.lock')}",
+        f"{python} -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'",
+        f"if [ -f {shlex.quote(env_root + '/' + _ENV_READY_MARKER)} ]; then",
+        f"  echo {_ENV_REUSED_SENTINEL}",
+        "  exit 0",
+        "fi",
+        f"rm -rf {shlex.quote(venv1)} {shlex.quote(venv2)}",
+        create(venv1),
+        create(venv2),
+    ]
+    if not use_uv:
+        # pip's own version is not part of the replicated environment, so
+        # failing to upgrade it is genuinely non-fatal.
+        for venv in (venv1, venv2):
+            lines.append(
+                install(venv, "--upgrade pip", timeout=30)
+                + " || echo 'pip upgrade failed, continuing'"
+            )
+    # Both environments exchange dill bytes with the submitting process, so
+    # both get the versions that process is running where they are known.
+    lines.append(install(venv1, serializers))
+    lines.append(install(venv2, serializers))
+
+    # Rebuild the local environment on the worker, from one requirements file:
+    # a single resolve is far faster than one install per package, and a
+    # conflict is reported once. No `|| echo`: a package that cannot install
+    # means the remote environment does not match the local one, and the
+    # function would fail later with a less obvious error.
+    # `excluded_packages` is the documented way to drop one deliberately.
+    mirrored = _mirrored_requirements(requirements, config)
+    if mirrored:
+        requirements_path = f"{work_dir}/clustrix_requirements.txt"
+        _write_remote_text(
+            ssh_client,
+            requirements_path,
+            "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items())) + "\n",
+        )
+        lines.append(f"echo 'Replicating local environment ({len(mirrored)} packages)'")
+        lines.append(install(venv2, f"-r {shlex.quote(requirements_path)}"))
+
+    for package_spec in getattr(config, "cluster_packages", None) or []:
+        if isinstance(package_spec, str):
+            lines.append(install(venv2, shlex.quote(package_spec)))
+        elif isinstance(package_spec, dict) and package_spec.get("package"):
+            what = shlex.quote(package_spec["package"])
+            if package_spec.get("pip_args"):
+                what += f" {package_spec['pip_args']}"
+            lines.append(install(venv2, what, package_spec.get("timeout", 300)))
+
+    for cmd in getattr(config, "venv_post_install_commands", None) or []:
+        lines.append(f"( . {shlex.quote(venv2)}/bin/activate && {cmd} )")
+
+    lines.append(f"touch {shlex.quote(env_root + '/' + _ENV_READY_MARKER)}")
+
+    script_path = f"{work_dir}/clustrix_env_setup.sh"
+    _write_remote_text(ssh_client, script_path, "\n".join(lines) + "\n")
+    stdin, stdout, stderr = ssh_client.exec_command(
+        f"bash {shlex.quote(script_path)} 2>&1"
+    )
+    output = stdout.read().decode()
+    if stdout.channel.recv_exit_status() != 0:
+        raise RuntimeError(
+            "Failed to setup two-venv environment. The build script "
+            f"({script_path}) ended with:\n" + "\n".join(output.splitlines()[-25:])
+        )
+    return _ENV_REUSED_SENTINEL in output.splitlines()
+
+
+def _mirrored_requirements(
+    requirements: Dict[str, str], config: Optional[ClusterConfig]
+) -> Dict[str, str]:
+    """The local packages to reinstall in the execution environment.
+
+    Everything the local package manager reports, less the serializers (which
+    are installed on their own, first) and anything in ``excluded_packages``.
+    Empty when ``replicate_local_environment`` is off.
+    """
+    if not requirements or not getattr(config, "replicate_local_environment", True):
+        return {}
+    excluded = {
+        str(name).lower() for name in (getattr(config, "excluded_packages", None) or [])
+    }
+    return {
+        k: v
+        for k, v in requirements.items()
+        if k not in _ESSENTIAL_PACKAGES and k.lower() not in excluded
+    }
+
+
 def setup_two_venv_environment(
     ssh_client,
     work_dir: str,
@@ -1910,14 +2143,16 @@ def setup_two_venv_environment(
     if conda_sh:
         conda_available = True
         conda_setup_prefix = f". {conda_sh}"
-        print(f"Conda available on remote system ({conda_sh}), using it for both venvs")
+        logger.info(
+            "Conda available on remote system (%s), using it for both venvs", conda_sh
+        )
     else:
         stdin, stdout, stderr = ssh_client.exec_command(
             "bash -lc 'conda --version' 2>/dev/null"
         )
         if "conda" in stdout.read().decode():
             conda_available = True
-            print("Conda available on remote system, using it for both venvs")
+            logger.info("Conda available on remote system, using it for both venvs")
 
     if conda_available:
         # Use conda for both VENV1 and VENV2 to ensure compatibility.
@@ -1932,9 +2167,6 @@ def setup_two_venv_environment(
         remote_python_version = local_python_version
     else:
         # Fall back to system Python search
-        compatible_python = None
-        venv1_python = None
-
         # Try to find system Python (many clusters don't have this accessible)
         venv1_candidates = [
             f"python{local_python_version}",
@@ -1949,40 +2181,12 @@ def setup_two_venv_environment(
             "python",
         ]
 
-        probed: List[Tuple[str, str]] = []
-        for python_cmd in venv1_candidates:
-            test_cmd = (
-                f"{python_cmd} -c 'import sys; print(sys.version_info[:2])' 2>/dev/null"
-            )
-            stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
-            version_output = stdout.read().decode().strip()
-
-            if version_output and "(" in version_output:
-                try:
-                    version_str = version_output.split("(")[1].split(")")[0]
-                    major, minor = map(int, version_str.split(", ")[:2])
-                except (IndexError, ValueError) as exc:
-                    # Narrowed to what parsing that output can raise. Skipping
-                    # an interpreter whose version banner is unreadable is a
-                    # correct answer -- it is not a usable candidate -- and
-                    # _select_remote_python raises if none of them are.
-                    logger.debug(
-                        "Ignoring remote interpreter %s: could not parse %r " "(%s).",
-                        python_cmd,
-                        version_output,
-                        exc,
-                    )
-                    continue
-                if major == 3:
-                    probed.append((python_cmd, f"{major}.{minor}"))
-                    if f"{major}.{minor}" == local_python_version:
-                        break
+        probed = _probe_remote_pythons(ssh_client, venv1_candidates, config)
 
         # Not "any Python 3 will do": the payload's bytecode is version-locked.
-        venv1_python, remote_python_version = _select_remote_python(
+        compatible_python, remote_python_version = _select_remote_python(
             probed, local_python_version
         )
-        compatible_python = venv1_python
 
     # Environment names.
     #
@@ -1997,11 +2201,49 @@ def setup_two_venv_environment(
     # the first job's environments, and a job whose requirements differ gets
     # its own rather than silently inheriting the wrong ones. `conda create`
     # is skipped when the environment already exists.
-    venv1_path = f"{work_dir}/venv1_serialization"
-    venv2_path = f"{work_dir}/venv2_execution"
     env_key = _environment_key(remote_python_version, requirements, config)
+
+    if compatible_python != "conda":
+        # Plain virtualenvs, keyed on content exactly like the conda
+        # environments below and for the same reason.
+        env_root = _virtualenv_cache_root(work_dir, env_key)
+        reused = _build_virtualenv_pair(
+            ssh_client, work_dir, compatible_python, env_root, requirements, config
+        )
+        logger.info(
+            "%s virtualenvs at %s",
+            "Reusing existing" if reused else "Built",
+            env_root,
+        )
+        return {
+            "compatible_python": compatible_python,
+            "remote_python_version": remote_python_version,
+            "venv1_python": f"{env_root}/venv1_serialization/bin/python",
+            "venv1_path": f"{env_root}/venv1_serialization",
+            "venv2_python": f"{env_root}/venv2_execution/bin/python",
+            "venv2_path": f"{env_root}/venv2_execution",
+            "conda_env1_name": None,
+            "conda_env2_name": None,
+            "uses_conda": False,
+            "environment_reused": reused,
+        }
+
     conda_env1_name = f"clustrix_venv1_{env_key}"
     conda_env2_name = f"clustrix_venv2_{env_key}"
+    conda_info: Dict[str, Any] = {
+        "compatible_python": compatible_python,
+        "remote_python_version": remote_python_version,
+        "venv1_python": f"conda run -n {conda_env1_name} python",
+        "venv1_path": f"conda:{conda_env1_name}",
+        "venv2_python": f"conda run -n {conda_env2_name} python",
+        "venv2_path": f"conda:{conda_env2_name}",
+        "conda_env1_name": conda_env1_name,
+        "conda_env2_name": conda_env2_name,
+        # For backward compatibility with job script generation
+        "conda_env_name": conda_env2_name,
+        "conda_setup_prefix": conda_setup_prefix,
+        "uses_conda": True,
+    }
 
     commands = [f"cd {shlex.quote(work_dir)}"]
     if conda_setup_prefix:
@@ -2009,84 +2251,36 @@ def setup_two_venv_environment(
         # has to be sourced first. The generated job script does the same.
         commands.insert(0, conda_setup_prefix)
 
-    if compatible_python == "conda" and _conda_envs_exist(
+    if _conda_envs_exist(
         ssh_client, conda_setup_prefix, conda_env1_name, conda_env2_name
     ):
         # Already built by an earlier job with the same requirements. Building
         # them again would cost ten minutes per environment for no change.
-        print(f"Reusing existing conda environments ({env_key})")
-        return {
-            "compatible_python": compatible_python,
-            "remote_python_version": remote_python_version,
-            "venv1_python": f"conda run -n {conda_env1_name} python",
-            "venv1_path": f"conda:{conda_env1_name}",
-            "venv2_python": f"conda run -n {conda_env2_name} python",
-            "venv2_path": f"conda:{conda_env2_name}",
-            "conda_env1_name": conda_env1_name,
-            "conda_env2_name": conda_env2_name,
-            "conda_env_name": conda_env2_name,
-            "conda_setup_prefix": conda_setup_prefix,
-            "uses_conda": True,
-        }
+        logger.info("Reusing existing conda environments (%s)", env_key)
+        return dict(conda_info, environment_reused=True)
 
-    if compatible_python == "conda":
-        # Use conda for both VENV1 and VENV2 (preferred for clusters)
-        commands.extend(
-            [
-                # Create VENV1 using conda, matching the local Python version
-                # so dill payloads round-trip (see remote_python_version above)
-                f"conda create -n {shlex.quote(conda_env1_name)} "
-                f"python={shlex.quote(remote_python_version)} -y",
-                f"conda run -n {conda_env1_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv1'",
-                f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30",
-                # Create VENV2 using conda, same version as VENV1 for execution
-                f"conda create -n {shlex.quote(conda_env2_name)} "
-                f"python={shlex.quote(remote_python_version)} -y",
-                f"conda run -n {conda_env2_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
-            ]
-        )
-    else:
-        # Fall back to regular venv (less common on clusters)
-        commands.extend(
-            [
-                # Create VENV1 (serialization environment)
-                f"{compatible_python} -m venv {shlex.quote(venv1_path)}",
-                f". {shlex.quote(venv1_path)}/bin/activate",
-                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv1'",
-                "pip install dill cloudpickle --timeout=30",
-                "deactivate",
-                # Create VENV2 using regular venv
-                f"{compatible_python} -m venv {shlex.quote(venv2_path)}",
-                f". {shlex.quote(venv2_path)}/bin/activate",
-                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
-                "deactivate",
-            ]
-        )
+    commands.extend(
+        [
+            # Create VENV1 using conda, matching the local Python version
+            # so dill payloads round-trip (see remote_python_version above)
+            f"conda create -n {shlex.quote(conda_env1_name)} "
+            f"python={shlex.quote(remote_python_version)} -y",
+            f"conda run -n {conda_env1_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv1'",
+            f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30",
+            # Create VENV2 using conda, same version as VENV1 for execution
+            f"conda create -n {shlex.quote(conda_env2_name)} "
+            f"python={shlex.quote(remote_python_version)} -y",
+            f"conda run -n {conda_env2_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
+        ]
+    )
 
     # Install essential packages in VENV2
-    essential_packages = ["dill", "cloudpickle"]
-    for pkg in essential_packages:
-        if compatible_python == "conda":
-            if pkg in requirements:
-                commands.append(
-                    f"conda run -n {conda_env2_name} pip install "
-                    f"{shlex.quote(f'{pkg}=={requirements[pkg]}')} --timeout=30"
-                )
-            else:
-                commands.append(
-                    f"conda run -n {conda_env2_name} pip install "
-                    f"{shlex.quote(pkg)} --timeout=30"
-                )
-        else:
-            commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
-            if pkg in requirements:
-                commands.append(
-                    f"pip install {shlex.quote(f'{pkg}=={requirements[pkg]}')} "
-                    f"--timeout=30"
-                )
-            else:
-                commands.append(f"pip install {shlex.quote(pkg)} --timeout=30")
-            commands.append("deactivate")
+    for pkg in _ESSENTIAL_PACKAGES:
+        spec = f"{pkg}=={requirements[pkg]}" if pkg in requirements else pkg
+        commands.append(
+            f"conda run -n {conda_env2_name} pip install "
+            f"{shlex.quote(spec)} --timeout=30"
+        )
 
     # Rebuild the local environment on the worker.
     #
@@ -2100,103 +2294,58 @@ def setup_two_venv_environment(
     # The specs go into a requirements file rather than one `pip install` per
     # package: a single resolve is far faster over a few hundred packages, and
     # pip reports a conflict once instead of leaving a half-built environment.
-    if requirements and getattr(config, "replicate_local_environment", True):
-        excluded = {
-            str(name).lower()
-            for name in (getattr(config, "excluded_packages", None) or [])
-        }
-        mirrored = {
-            k: v
-            for k, v in requirements.items()
-            if k not in essential_packages and k.lower() not in excluded
-        }
-
-        if mirrored:
-            spec_lines = "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items()))
-            requirements_path = f"{work_dir}/clustrix_requirements.txt"
-            # Written over SFTP rather than emitted as a shell heredoc: these
-            # commands are joined with " && ", which would put the heredoc
-            # terminator on a line with `&& ...` after it. Bash would not
-            # recognise it as a terminator, and `cat` would swallow the rest of
-            # the setup script into the requirements file -- so pip never ran
-            # and the environment silently stayed empty.
-            _write_remote_text(ssh_client, requirements_path, spec_lines + "\n")
-            commands.append(
-                f"echo 'Replicating local environment ({len(mirrored)} packages)...'"
-            )
-            # No `|| echo`: a package that cannot install here means the remote
-            # environment does not match the local one, and the function will
-            # fail later with a less obvious error. Name it now. `excluded_packages`
-            # is the documented way to drop one deliberately.
-            install = f"pip install -r {shlex.quote(requirements_path)} --timeout=300"
-            if compatible_python == "conda":
-                commands.append(f"conda run -n {conda_env2_name} {install}")
-            else:
-                commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
-                commands.append(install)
-                commands.append("deactivate")
+    mirrored = _mirrored_requirements(requirements, config)
+    if mirrored:
+        spec_lines = "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items()))
+        requirements_path = f"{work_dir}/clustrix_requirements.txt"
+        # Written over SFTP rather than emitted as a shell heredoc: these
+        # commands are joined with " && ", which would put the heredoc
+        # terminator on a line with `&& ...` after it. Bash would not
+        # recognise it as a terminator, and `cat` would swallow the rest of
+        # the setup script into the requirements file -- so pip never ran
+        # and the environment silently stayed empty.
+        _write_remote_text(ssh_client, requirements_path, spec_lines + "\n")
+        commands.append(
+            f"echo 'Replicating local environment ({len(mirrored)} packages)...'"
+        )
+        # No `|| echo`: a package that cannot install here means the remote
+        # environment does not match the local one, and the function will
+        # fail later with a less obvious error. Name it now. `excluded_packages`
+        # is the documented way to drop one deliberately.
+        commands.append(
+            f"conda run -n {conda_env2_name} pip install "
+            f"-r {shlex.quote(requirements_path)} --timeout=300"
+        )
 
     # Add cluster-specific package installations from config
-    if hasattr(config, "cluster_packages") and config.cluster_packages:
-        commands.append("echo 'Installing cluster-specific packages...'")
-        for package_spec in config.cluster_packages:
-            if isinstance(package_spec, str):
-                # Simple package name or package==version
-                if compatible_python == "conda":
-                    commands.append(
-                        f"conda run -n {conda_env2_name} pip install "
-                        f"{shlex.quote(package_spec)} --timeout=300"
-                    )
-                else:
-                    commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
-                    commands.append(
-                        f"pip install {shlex.quote(package_spec)} --timeout=300"
-                    )
-                    commands.append("deactivate")
-            elif isinstance(package_spec, dict):
-                # Complex package specification with options
-                pkg_name = package_spec.get("package", "")
-                pip_args = package_spec.get("pip_args", "")
-                timeout = package_spec.get("timeout", 300)
-
-                if pkg_name:
-                    if compatible_python == "conda":
-                        install_cmd = (
-                            f"conda run -n {conda_env2_name} pip install "
-                            f"{shlex.quote(pkg_name)}"
-                        )
-                    else:
-                        commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
-                        install_cmd = f"pip install {shlex.quote(pkg_name)}"
-                    if pip_args:
-                        install_cmd += f" {pip_args}"
-                    install_cmd += f" --timeout={timeout}"
-                    commands.append(install_cmd)
-                    if compatible_python != "conda":
-                        commands.append("deactivate")
+    for package_spec in getattr(config, "cluster_packages", None) or []:
+        if isinstance(package_spec, str):
+            # Simple package name or package==version
+            commands.append(
+                f"conda run -n {conda_env2_name} pip install "
+                f"{shlex.quote(package_spec)} --timeout=300"
+            )
+        elif isinstance(package_spec, dict) and package_spec.get("package"):
+            # Complex package specification with options
+            install_cmd = (
+                f"conda run -n {conda_env2_name} pip install "
+                f"{shlex.quote(package_spec['package'])}"
+            )
+            if package_spec.get("pip_args"):
+                install_cmd += f" {package_spec['pip_args']}"
+            install_cmd += f" --timeout={package_spec.get('timeout', 300)}"
+            commands.append(install_cmd)
 
     # Add cluster-specific post-installation commands from config
-    if (
-        hasattr(config, "venv_post_install_commands")
-        and config.venv_post_install_commands
-    ):
-        commands.append("echo 'Running cluster-specific post-installation commands...'")
-        for cmd in config.venv_post_install_commands:
-            if compatible_python == "conda":
-                # Run post-install commands in conda environment
-                commands.append(f"conda run -n {conda_env2_name} {cmd}")
-            else:
-                commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
-                commands.append(f"{cmd}")
-                commands.append("deactivate")
+    for cmd in getattr(config, "venv_post_install_commands", None) or []:
+        commands.append(f"conda run -n {conda_env2_name} {cmd}")
 
     # Mark the environments complete. This is the LAST link in the `&&` chain,
     # so it is only reached when every create and every install succeeded --
     # which is what makes the reuse check above safe. Without it, a run whose
     # installs failed left correctly-named but half-empty environments that
     # every later job with the same requirements silently reused.
-    if compatible_python == "conda":
-        commands.extend(_conda_env_ready_commands([conda_env1_name, conda_env2_name]))
+    commands.extend(_conda_env_ready_commands([conda_env1_name, conda_env2_name]))
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -2204,46 +2353,10 @@ def setup_two_venv_environment(
 
     # Wait for completion with extended timeout
     exit_status = stdout.channel.recv_exit_status()
-
-    if exit_status == 0:
-        result: Dict[str, Any] = {
-            "compatible_python": compatible_python,
-            "remote_python_version": remote_python_version,
-        }
-
-        if compatible_python == "conda":
-            # Both venvs use conda
-            result.update(
-                {
-                    "venv1_python": f"conda run -n {conda_env1_name} python",
-                    "venv1_path": f"conda:{conda_env1_name}",
-                    "venv2_python": f"conda run -n {conda_env2_name} python",
-                    "venv2_path": f"conda:{conda_env2_name}",
-                    "conda_env1_name": conda_env1_name,
-                    "conda_env2_name": conda_env2_name,
-                    "conda_env_name": conda_env2_name,  # For backward compatibility with job script generation
-                    "conda_setup_prefix": conda_setup_prefix,
-                    "uses_conda": True,
-                }
-            )
-        else:
-            # Both venvs use regular virtualenv
-            result.update(
-                {
-                    "venv1_python": f"{venv1_path}/bin/python",
-                    "venv1_path": venv1_path,
-                    "venv2_python": f"{venv2_path}/bin/python",
-                    "venv2_path": venv2_path,
-                    "conda_env1_name": None,
-                    "conda_env2_name": None,
-                    "uses_conda": False,
-                }
-            )
-
-        return result
-    else:
+    if exit_status != 0:
         error_output = stderr.read().decode()
         raise RuntimeError(f"Failed to setup two-venv environment: {error_output}")
+    return dict(conda_info, environment_reused=False)
 
 
 def setup_python_compatible_environment(
@@ -2556,6 +2669,56 @@ def result_key_export_line(remote_job_dir: str) -> str:
     return f"export CLUSTRIX_RESULT_KEY=$(cat {key_file} 2>/dev/null || true)"
 
 
+#: Where the two module systems in use install the script that defines the
+#: ``module`` shell function. Environment Modules first, then Lmod.
+_MODULE_INIT_SCRIPTS = (
+    "/etc/profile.d/modules.sh",
+    "/usr/share/modules/init/bash",
+    "/etc/profile.d/lmod.sh",
+    "/etc/profile.d/z00_lmod.sh",
+    "/usr/share/lmod/lmod/init/bash",
+)
+
+
+def module_load_lines(config) -> list:
+    """Shell lines that load ``config.module_loads``, or stop saying why not.
+
+    ``module`` is a shell function that login shells get from a profile
+    script. clustrix reaches the cluster over an SSH exec channel, which is
+    not a login shell, and a batch job submitted from there inherits that
+    same bare environment -- so ``module load`` was "command not found" in
+    the job, the script carried on regardless, and the function ran with
+    whatever Python happened to be on PATH. The first line defines the
+    function when the shell does not have it; each load then stops the
+    script if it fails, because everything after it assumes the module.
+
+    Entries stay unquoted: the module name is ``module``'s bare argument, so
+    quoting would change what is loaded. They are validated against a strict
+    allowlist instead, and a metacharacter is refused by name.
+    """
+    names = []
+    for module in getattr(config, "module_loads", None) or []:
+        if not str(module).strip():
+            # The widget's textarea yields blank lines; `module load ` is not
+            # an error worth refusing a job over.
+            continue
+        names.append(validate_shell_fragment("module_loads", str(module).strip()))
+    if not names:
+        return []
+    lines = [
+        "if ! type module >/dev/null 2>&1; then for _clustrix_m in "
+        + " ".join(_MODULE_INIT_SCRIPTS)
+        + '; do if [ -r "$_clustrix_m" ]; then . "$_clustrix_m"; break; fi; '
+        "done; fi"
+    ]
+    for name in names:
+        lines.append(
+            f"module load {name} || {{ echo 'clustrix: module load {name} "
+            "failed, so the job was not run. Check module_loads.' >&2; exit 1; }"
+        )
+    return lines
+
+
 def environment_setup_lines(config) -> list:
     """The module-load / export / pre-execution lines every generator emits.
 
@@ -2575,14 +2738,7 @@ def environment_setup_lines(config) -> list:
       restricting them would delete the feature, so they pass through. A user
       who writes a command there is asking for it to run.
     """
-    lines: list = []
-    for module in getattr(config, "module_loads", None) or []:
-        if not str(module).strip():
-            # The widget's textarea yields blank lines; `module load ` is not
-            # an error worth refusing a job over.
-            continue
-        name = validate_shell_fragment("module_loads", str(module).strip())
-        lines.append(f"module load {name}")
+    lines: list = module_load_lines(config)
     for var, value in (getattr(config, "environment_variables", None) or {}).items():
         lines.append(f"export {validate_env_var_name(var)}={shlex.quote(str(value))}")
     for cmd in getattr(config, "pre_execution_commands", None) or []:
@@ -2765,6 +2921,8 @@ def generate_two_venv_execution_commands(
     conda_env1_name: Optional[str] = None,
     conda_env2_name: Optional[str] = None,
     venv2_python: str = "python",
+    venv1_path: Optional[str] = None,
+    venv2_path: Optional[str] = None,
 ) -> list:
     """
     Generate the standardized two-venv execution commands.
@@ -2791,6 +2949,10 @@ def generate_two_venv_execution_commands(
             environment and the user's statement about its interpreter.
             VENV1 is never affected: it is clustrix's serialization
             machinery and has to stay on the version dill was pinned to.
+        venv1_path: The serialization virtualenv, when conda is not in use.
+            Defaults to the job directory's own, which is where it lived
+            before virtualenvs were shared between jobs.
+        venv2_path: The execution virtualenv, likewise.
 
     Returns:
         List of command strings for two-venv execution
@@ -2801,9 +2963,19 @@ def generate_two_venv_execution_commands(
     # stops being a command. Two of these sites also *open* a double-quoted
     # `python -c "` string, where an unquoted `"` broke straight out into the
     # shell.
-    quoted_dir = shlex.quote(remote_job_dir)
+    quoted_venv1 = shlex.quote(venv1_path or f"{remote_job_dir}/venv1_serialization")
+    quoted_venv2 = shlex.quote(venv2_path or f"{remote_job_dir}/venv2_execution")
     env1 = shlex.quote(conda_env1_name) if conda_env1_name else None
     env2 = shlex.quote(conda_env2_name) if conda_env2_name else None
+
+    # After each stage. A later stage cannot do anything useful once an
+    # earlier one has failed, and letting it run replaced the real ending
+    # with its own: a function that called sys.exit(), or was killed, left
+    # stage 3 to report "result_raw.pkl not found" as though that were the
+    # error. Stopping here leaves the stage's own exit status as the script's.
+    stop_on_failure = (
+        '_clustrix_rc=$?; [ "$_clustrix_rc" -eq 0 ] || exit "$_clustrix_rc"'
+    )
 
     def _serializer_preamble() -> list:
         """Lines binding ``_ser`` to dill, or failing with a reason.
@@ -2883,7 +3055,7 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f". {quoted_dir}/venv1_serialization/bin/activate"
+                else f". {quoted_venv1}/bin/activate || exit 1"
             ),
             (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
@@ -2892,73 +3064,28 @@ def generate_two_venv_execution_commands(
             "import sys",
             "import traceback",
             "",
-            "try:",
-            "    import dill",
-            "except ImportError:",
-            "    dill = None",
-            "try:",
-            "    import cloudpickle",
-            "except ImportError:",
-            "    cloudpickle = None",
-            "",
-            "print('VENV1 - Deserializing function data')",
+            "print('VENV1 - Reading function data')",
             "print('Python version:', sys.version)",
             "",
             "try:",
             "    with open('function_data.pkl', 'rb') as f:",
             "        data = pickle.load(f)",
             "    ",
-            "    # Try to deserialize function",
-            "    func = None",
-            "    clean_source = None",
-            "    func_info = data.get('func_info', {})",
-            "    try:",
-            "        func = dill.loads(data['function']) if dill else None",
-            "        print('Successfully deserialized function with dill')",
-            "    except Exception as e:",
-            "        print('Dill deserialization failed:', str(e))",
-            "        try:",
-            "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
-            "            print('Successfully deserialized function with cloudpickle')",
-            "        except Exception as e2:",
-            "            print('Cloudpickle deserialization failed:', str(e2))",
-            "            # Try source code fallback",
-            "            if func_info.get('source'):",
-            "                print('Using source code fallback')",
-            "                # Remove @cluster decorator from source",
-            "                import textwrap",
-            "                source = func_info['source']",
-            "                lines = source.split('\\n')",
-            "                clean_lines = []",
-            "                for line in lines:",
-            "                    if not line.strip().startswith('@'):",
-            "                        clean_lines.append(line)",
-            "                clean_source = '\\n'.join(clean_lines)",
-            "                clean_source = textwrap.dedent(clean_source)",
-            "                ",
-            "                # Create function from source",
-            "                namespace = {}",
-            "                exec(clean_source, namespace)",
-            "                func = namespace[func_info['name']]",
-            "                print('Successfully created function from source code')",
-            "            else:",
-            "                raise Exception('All deserialization methods failed')",
-            "    ",
-            "    # _ser, not stdlib pickle: args may carry classes defined in",
-            "    # the caller's __main__, which pickle can only store by name.",
-            "    args = _ser.loads(data['args'])",
-            "    kwargs = _ser.loads(data['kwargs'])",
-            "    ",
-            "    # Pass data to VENV2 for execution. _ser (dill/cloudpickle) is",
-            "    # required here: stdlib pickle cannot serialize a function that",
-            "    # is not importable by name in this interpreter.",
+            "    # The function, its arguments and (in stage 3) its result are",
+            "    # handed on as bytes and never rebuilt here. This environment",
+            "    # holds clustrix's serializers and nothing else, so rebuilding",
+            "    # them needed every package they touch: a numpy array as an",
+            "    # argument or a return value died in this stage on",
+            "    # ModuleNotFoundError. Re-serializing the rebuilt function also",
+            "    # dropped every project-local module the caller had embedded by",
+            "    # value. VENV2 is the one place the user's objects exist.",
+            "    _handoff = {}",
+            "    for _name in ('function', 'args', 'kwargs'):",
+            "        if not isinstance(data.get(_name), bytes):",
+            "            raise ValueError('function_data.pkl has no serialized ' + _name)",
+            "        _handoff[_name + '_bytes'] = data[_name]",
             "    with open('function_deserialized.pkl', 'wb') as f:",
-            "        if clean_source is not None:",
-            "            # Function was created from source code, pass the source",
-            "            _ser.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
-            "        else:",
-            "            # Function was deserialized from binary, pass the function object",
-            "            _ser.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+            "        _ser.dump(_handoff, f, protocol=4)",
             "    ",
             "    print('VENV1 - Function data prepared for VENV2 using', _ser.__name__)",
             "    ",
@@ -2966,6 +3093,7 @@ def generate_two_venv_execution_commands(
         + _error_handler("venv1_deserialize", "VENV1 - Error during deserialization:")
         + [
             '"',
+            stop_on_failure,
             "",
             "# Step 2: Use VENV2 to execute the function",
             (
@@ -2976,12 +3104,12 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env2_name}"
                 if conda_env2_name
-                else f". {quoted_dir}/venv2_execution/bin/activate"
+                else f". {quoted_venv2}/bin/activate || exit 1"
             ),
             (
                 f'conda run -n {env2} {venv2_python} -c "'
                 if conda_env2_name
-                else f'{quoted_dir}/venv2_execution/bin/python -c "'
+                else f'{quoted_venv2}/bin/python -c "'
             ),
         ]
         + _serializer_preamble()
@@ -2999,23 +3127,26 @@ def generate_two_venv_execution_commands(
             "    with open('function_deserialized.pkl', 'rb') as f:",
             "        exec_data = _ser.load(f)",
             "    ",
-            "    if 'func' in exec_data:",
-            "        # Function object was passed",
-            "        func = exec_data['func']",
-            "    elif 'source' in exec_data:",
-            "        # Source code was passed, recreate function",
-            "        print('Recreating function from source code in VENV2')",
-            "        namespace = {}",
-            "        exec(exec_data['source'], namespace)",
-            "        func = namespace[exec_data['func_name']]",
-            "    else:",
-            "        raise Exception('No function or source code found')",
-            "    ",
-            "    args = exec_data['args']",
-            "    kwargs = exec_data['kwargs']",
+            "    # The caller's own bytes: dill first, cloudpickle when dill",
+            "    # cannot, which is the order the caller's serializer uses. When",
+            "    # neither can, both reasons are reported -- they usually differ,",
+            "    # and dill's tends to name the object it could not rebuild.",
+            "    try:",
+            "        func = _ser.loads(exec_data['function_bytes'])",
+            "    except Exception as _first:",
+            "        try:",
+            "            import cloudpickle",
+            "            func = cloudpickle.loads(exec_data['function_bytes'])",
+            "        except Exception as _second:",
+            "            raise RuntimeError(",
+            "                'Could not deserialize the function on the worker. '",
+            "                + _ser.__name__ + ' said ' + type(_first).__name__ + ': ' + str(_first)",
+            "                + '; cloudpickle said ' + type(_second).__name__ + ': ' + str(_second)",
+            "            ) from _second",
+            "    args = _ser.loads(exec_data['args_bytes'])",
+            "    kwargs = _ser.loads(exec_data['kwargs_bytes'])",
             "    ",
             "    # Execute the function",
-            "    print('Executing function with args:', args)",
             "    result = func(*args, **kwargs)",
             "    print('Function execution completed successfully')",
             "    ",
@@ -3027,6 +3158,7 @@ def generate_two_venv_execution_commands(
         + _error_handler("venv2_execute", "VENV2 - Error during execution:")
         + [
             '"',
+            stop_on_failure,
             "",
             "# Step 3: Use VENV1 to serialize the result",
             (
@@ -3037,7 +3169,7 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f". {quoted_dir}/venv1_serialization/bin/activate"
+                else f". {quoted_venv1}/bin/activate || exit 1"
             ),
             (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
@@ -3046,18 +3178,16 @@ def generate_two_venv_execution_commands(
             "import sys",
             "import traceback",
             "",
-            "print('VENV1 - Serializing result')",
+            "print('VENV1 - Signing result')",
             "",
             "try:",
             "    import os",
             "    if not os.path.exists('result_raw.pkl'):",
             "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
+            "    # Bytes in, the same bytes out: see stage 1 for why the result",
+            "    # is not rebuilt in this environment.",
             "    with open('result_raw.pkl', 'rb') as f:",
-            "        result = _ser.load(f)",
-            "    ",
-            "    print('Result loaded from VENV2:', type(result))",
-            "    ",
-            "    _payload_bytes = _ser.dumps(result, protocol=4)",
+            "        _payload_bytes = f.read()",
             "    with open('result.pkl', 'wb') as f:",
             "        f.write(_payload_bytes)",
             "    ",
@@ -3386,6 +3516,8 @@ def job_execution_lines(
                 remote_job_dir,
                 conda_env1_name,
                 conda_env2_name,
+                venv1_path=config.venv_info.get("venv1_path"),
+                venv2_path=config.venv_info.get("venv2_path"),
                 # `python_executable` is the user's statement about which
                 # interpreter runs their code, so it applies to the execution
                 # environment when the user named that environment -- and only
@@ -3418,7 +3550,10 @@ def job_execution_lines(
         else:
             entry_lines = [
                 f"cd {quoted_dir}",
-                ". venv/bin/activate",
+                # Without the guard a venv that was never built is a line of
+                # noise on stderr, and the function then runs under whatever
+                # `python` the bare PATH resolves to.
+                ". venv/bin/activate || exit 1",
                 f'{python_cmd} -c "',
             ]
         script_lines.append(result_key_export_line(remote_job_dir))
@@ -3910,6 +4045,7 @@ def setup_gpu_enabled_venv2(
     requirements: Dict[str, str],
     gpu_info: Dict[str, Any],
     config: Optional[ClusterConfig] = None,
+    venv_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Setup VENV2 with GPU support based on remote cluster capabilities.
@@ -3927,6 +4063,11 @@ def setup_gpu_enabled_venv2(
         requirements: Package requirements from local environment
         gpu_info: GPU capabilities from detect_gpu_capabilities()
         config: Cluster configuration
+        venv_info: The layout ``setup_two_venv_environment`` returned. The
+            execution environment is named after its contents and shared
+            between jobs, so its name cannot be derived from ``work_dir``;
+            without this the packages went to an environment that the job
+            script never activates.
 
     Returns:
         Dict with VENV2 setup information
@@ -3960,8 +4101,14 @@ def setup_gpu_enabled_venv2(
         return venv2_info
 
     # Determine if we're using conda or venv
-    conda_env2_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
-    venv2_path = f"{work_dir}/venv2_execution"
+    layout = venv_info or {}
+    if layout.get("environment_reused"):
+        # A reused environment had this done when it was built.
+        return venv2_info
+    conda_env2_name = (
+        layout.get("conda_env2_name") or f"clustrix_venv2_{work_dir.split('/')[-1]}"
+    )
+    venv2_path = layout.get("venv2_path") or f"{work_dir}/venv2_execution"
 
     # Check if conda is available
     conda_available = False
@@ -4096,11 +4243,11 @@ def enhanced_setup_two_venv_environment(
         config = get_config()
 
     # Step 1: Detect GPU capabilities (for VENV1 job distribution)
-    print("Detecting GPU capabilities on remote cluster...")
+    logger.info("Detecting GPU capabilities on remote cluster...")
     gpu_info = detect_gpu_capabilities(ssh_client, config)
 
     # Step 2: Setup basic two-venv environment
-    print("Setting up two-venv environment...")
+    logger.info("Setting up two-venv environment...")
     venv_info = setup_two_venv_environment(ssh_client, work_dir, requirements, config)
 
     # Step 3: Enhanced VENV2 with GPU support where a CUDA build can run.
@@ -4109,9 +4256,11 @@ def enhanced_setup_two_venv_environment(
     # one place: a second copy of the condition here is a second thing to
     # forget to update, which is how a `gpu_available` gate outlived the
     # evidence that justified it.
-    print(gpu_detection_summary(gpu_info))
+    logger.info(gpu_detection_summary(gpu_info))
     venv_info.update(
-        setup_gpu_enabled_venv2(ssh_client, work_dir, requirements, gpu_info, config)
+        setup_gpu_enabled_venv2(
+            ssh_client, work_dir, requirements, gpu_info, config, venv_info
+        )
     )
 
     # Step 4: Add GPU detection results to venv_info

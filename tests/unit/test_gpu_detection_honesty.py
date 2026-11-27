@@ -280,17 +280,26 @@ def gpu_host(
     # instead of a real one inside a real venv reaching out to PyPI. It is a
     # real executable on the host's PATH like every other tool here; nothing
     # is patched in-process.
-    version = f"{sys.version_info.major}, {sys.version_info.minor}"
+    #
+    # The venv it builds carries a `bin/python` of its own, because the
+    # shipped build script installs with `<venv>/bin/python -m pip` rather
+    # than through an activated `pip`; that one records to the same log as
+    # the `pip` above. `-c` answers both things the shipped code asks an
+    # interpreter directly: its version, and (for the build lock) nothing.
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
     _write_executable(
-        bindir / f"python{sys.version_info.major}.{sys.version_info.minor}",
+        bindir / f"python{version}",
         "#!/bin/sh\n"
         'if [ "$1" = "-c" ]; then\n'
-        f'  echo "({version})"\n'
+        f'  echo "{version}"\n'
         "  exit 0\n"
         "fi\n"
         'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
         '  mkdir -p "$3/bin"\n'
         '  printf "deactivate() { :; }\\n" > "$3/bin/activate"\n'
+        '  printf \'#!/bin/sh\\nshift 2\\nprintf "%%s\\\\n" "$*" >> "%s"\\n\' '
+        f'"{pip_log}" > "$3/bin/python"\n'
+        '  chmod +x "$3/bin/python"\n'
         "  exit 0\n"
         "fi\n"
         "exit 1\n",

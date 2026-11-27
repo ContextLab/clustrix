@@ -124,73 +124,138 @@ def connection(server):
 # ---------------------------------------------------------------------------
 
 
-def test_an_unmeasurable_error_file_is_unknown_not_running(connection, caplog):
+def _ssh_job(connection, name, command):
+    """Start ``command`` the way ``submit_ssh_job`` does and return its entry."""
+    remote_dir = pathlib.Path(connection.config.remote_work_dir) / name
+    remote_dir.mkdir()
+    (remote_dir / "job.sh").write_text(command + "\n")
+    out, _ = connection.execute_remote_command(
+        f"cd {remote_dir} && {{ nohup bash -c 'bash job.sh > job.out 2> job.err; "
+        "echo $? > job.exit.tmp; mv job.exit.tmp job.exit' "
+        "> /dev/null 2>&1 < /dev/null & echo $!; }",
+        check=True,
+    )
+    return remote_dir, {"remote_dir": str(remote_dir), "pid": int(out.strip())}
+
+
+def _wait_for(predicate, seconds=20.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_a_job_this_executor_cannot_measure_is_unknown_not_running(connection):
     """A job status of "running" must mean the job is running.
 
-    The SSH backend decides between "failed" and "running" by counting the
-    lines in ``job.err``. When that count could not be taken, the answer was
-    ``"running"``. The measurement failing says nothing whatsoever about
-    whether the job is running, and reporting it as running made the eventual
-    ``TimeoutError`` blame a job that may already have stopped.
-
-    Be precise about what this buys, because it is easy to overstate: the
-    caller's poll loop treats ``"unknown"`` exactly as it treated
-    ``"running"``, so the wait still runs to ``job_wait_timeout``. Nothing
-    fetches a result it should not. What changes is that the failure is now
-    *said* -- in the warning below, and in the timeout message, which spells
-    out that the status was unmeasurable rather than merely slow (see
-    ``tests/unit/test_job_wait_timeout.py``).
-
-    The trigger here is real and needs no patching: ``job.err`` is a
-    *directory*. ``sftp.stat`` reports it as present, so the code reaches the
-    count; ``wc -l`` on a directory writes nothing to stdout, so parsing the
-    count raises.
+    This test used to make ``job.err`` a directory, because the SSH backend
+    decided between "failed" and "running" by counting the lines in that file
+    and the assertion was about what happened when the count could not be
+    taken. The backend no longer reads ``job.err`` to decide anything -- see
+    the two tests below for why that inference was wrong in both directions
+    -- so the unmeasurable case is now a job with no recorded process: there
+    is nothing to ask about, and the honest answer is still "unknown".
     """
     remote_dir = pathlib.Path(connection.config.remote_work_dir) / "job-1"
     remote_dir.mkdir()
-    (remote_dir / "job.err").mkdir()
-
-    manager = SchedulerStatusManager(connection.config, connection)
-    active_jobs = {"job-1": {"remote_dir": str(remote_dir)}}
-
-    with caplog.at_level(logging.WARNING, logger="clustrix.executor_scheduler_status"):
-        status = manager.check_job_status("job-1", active_jobs)
-
-    assert status == "unknown", (
-        "an unreadable job.err was reported as a running job; the caller "
-        "polls on this answer"
-    )
-    messages = [record.getMessage() for record in caplog.records]
-    assert any("job.err" in message for message in messages), messages
-    assert any("NOT known to be running" in message for message in messages), messages
-
-
-def test_a_present_and_empty_error_file_still_means_running(connection):
-    """The honest paths are unchanged: this is what "running" is reserved for."""
-    remote_dir = pathlib.Path(connection.config.remote_work_dir) / "job-2"
-    remote_dir.mkdir()
-    (remote_dir / "job.err").write_text("")
 
     manager = SchedulerStatusManager(connection.config, connection)
     status = manager.check_job_status(
-        "job-2", {"job-2": {"remote_dir": str(remote_dir)}}
+        "job-1", {"job-1": {"remote_dir": str(remote_dir)}}
     )
 
-    assert status == "running"
+    assert status == "unknown"
 
 
-def test_a_non_empty_error_file_still_means_failed(connection):
-    """...and this is what "failed" is reserved for."""
-    remote_dir = pathlib.Path(connection.config.remote_work_dir) / "job-3"
-    remote_dir.mkdir()
-    (remote_dir / "job.err").write_text("Traceback (most recent call last):\n")
+def test_output_on_stderr_does_not_make_a_running_job_failed(connection):
+    """Stderr is where warnings go. Writing to it is not failing.
 
+    The assertion this replaces was ``a non-empty job.err means failed``, and
+    that asserted a defect: a function that emitted one DeprecationWarning was
+    reported failed while it was still running, and its result was never
+    collected. What decides is whether the process is alive.
+    """
+    remote_dir, entry = _ssh_job(connection, "job-2", "echo warning >&2; sleep 30")
     manager = SchedulerStatusManager(connection.config, connection)
-    status = manager.check_job_status(
-        "job-3", {"job-3": {"remote_dir": str(remote_dir)}}
-    )
+    try:
+        assert _wait_for(lambda: (remote_dir / "job.err").read_text() != "")
+        assert manager.check_job_status("job-2", {"job-2": entry}) == "running"
+    finally:
+        connection.execute_remote_command(
+            f"pkill -P {entry['pid']}; kill {entry['pid']}"
+        )
 
-    assert status == "failed"
+
+def test_a_job_that_exits_without_a_word_is_failed_not_running(connection):
+    """...and silence on stderr is not running.
+
+    The assertion this replaces was ``an empty job.err means running``. A job
+    that called ``sys.exit(3)``, or was killed, writes nothing to stderr and
+    no result either, so it was reported running until ``job_wait_timeout`` --
+    a day, by default. Its exit status is what says it ended.
+    """
+    remote_dir, entry = _ssh_job(connection, "job-3", "exit 3")
+    manager = SchedulerStatusManager(connection.config, connection)
+    active_jobs = {"job-3": entry}
+
+    assert _wait_for(lambda: (remote_dir / "job.exit").exists())
+    assert (remote_dir / "job.err").read_text() == ""
+    assert manager.check_job_status("job-3", active_jobs) == "failed"
+    assert "exit status 3" in manager.failure_summary("job-3", active_jobs)
+
+
+def test_a_killed_job_is_failed_and_says_what_killed_it(connection):
+    """``kill -9`` leaves no traceback; the exit status is the only witness."""
+    remote_dir, entry = _ssh_job(connection, "job-3k", "kill -9 $$")
+    manager = SchedulerStatusManager(connection.config, connection)
+    active_jobs = {"job-3k": entry}
+
+    assert _wait_for(lambda: (remote_dir / "job.exit").exists())
+    assert manager.check_job_status("job-3k", active_jobs) == "failed"
+    assert "SIGKILL" in manager.failure_summary("job-3k", active_jobs)
+
+
+def test_a_job_whose_process_vanished_is_failed_not_running(connection):
+    """A wrapper that was killed outright never records an exit status.
+
+    That is what a reboot or ``kill -9`` of the whole tree leaves: no result,
+    no ``job.exit``, and no process. Without the liveness test this was
+    "running" for ever.
+    """
+    remote_dir, entry = _ssh_job(connection, "job-3v", "sleep 60")
+    manager = SchedulerStatusManager(connection.config, connection)
+    active_jobs = {"job-3v": entry}
+
+    assert manager.check_job_status("job-3v", active_jobs) == "running"
+    connection.execute_remote_command(
+        f"kill -9 {entry['pid']}; pkill -9 -f {remote_dir}/; true"
+    )
+    assert _wait_for(
+        lambda: manager.check_job_status("job-3v", active_jobs) == "failed"
+    )
+    assert not (remote_dir / "job.exit").exists()
+    assert "process is gone" in manager.failure_summary("job-3v", active_jobs)
+
+
+def test_a_result_is_not_complete_until_the_job_has_exited(connection):
+    """``result.pkl`` appears a moment before its signature does.
+
+    Reporting "completed" on the file alone let a prompt poll download a
+    result and then refuse it as unsigned.
+    """
+    remote_dir, entry = _ssh_job(connection, "job-3r", "echo x > result.pkl; sleep 30")
+    manager = SchedulerStatusManager(connection.config, connection)
+    try:
+        assert _wait_for(lambda: (remote_dir / "result.pkl").exists())
+        assert manager.check_job_status("job-3r", {"job-3r": entry}) == "running"
+    finally:
+        connection.execute_remote_command(
+            f"pkill -P {entry['pid']}; kill {entry['pid']}"
+        )
 
 
 @pytest.mark.timeout(120)

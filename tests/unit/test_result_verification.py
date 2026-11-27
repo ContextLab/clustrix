@@ -150,7 +150,14 @@ class TestJobScriptEmitsTheSignature:
         from clustrix.utils import generate_two_venv_execution_commands
 
         script = "\n".join(generate_two_venv_execution_commands("/j", "e1", "e2"))
-        assert "_payload_bytes = _ser.dumps(result, protocol=4)" in script
+        # Stage 3 used to rebuild the result and serialize it again, and this
+        # asserted on that line. It now hands on the bytes stage 2 wrote
+        # without loading them (the serialization environment has none of the
+        # user's packages, so a numpy result could not be loaded there), and
+        # the property this test is about is unchanged: one variable holds
+        # the bytes, it is what gets written, and it is what gets signed.
+        assert "_payload_bytes = f.read()" in script
+        assert "_ser.dumps(result" not in script
         assert "f.write(_payload_bytes)" in script
         assert (
             "_hmac.new(_CLUSTRIX_KEY.encode(), _payload_bytes, _hashlib.sha256)"

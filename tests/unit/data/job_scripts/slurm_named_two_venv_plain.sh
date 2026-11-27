@@ -37,7 +37,7 @@ fi
 # will run the job, before any of it runs.
 conda run -n prod python -c "
 import sys
-_want = (3, 11)
+_want = (3, 13)
 _got = sys.version_info[:2]
 if _got != _want:
     sys.stderr.write(
@@ -57,7 +57,7 @@ if _got != _want:
 # VENV2: Function execution with proper environment
 
 # Step 1: Use VENV1 to deserialize function data
-. /remote/job/venv1_serialization/bin/activate
+. /remote/job/venv1_serialization/bin/activate || exit 1
 python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
@@ -77,73 +77,28 @@ except ImportError:
 import sys
 import traceback
 
-try:
-    import dill
-except ImportError:
-    dill = None
-try:
-    import cloudpickle
-except ImportError:
-    cloudpickle = None
-
-print('VENV1 - Deserializing function data')
+print('VENV1 - Reading function data')
 print('Python version:', sys.version)
 
 try:
     with open('function_data.pkl', 'rb') as f:
         data = pickle.load(f)
     
-    # Try to deserialize function
-    func = None
-    clean_source = None
-    func_info = data.get('func_info', {})
-    try:
-        func = dill.loads(data['function']) if dill else None
-        print('Successfully deserialized function with dill')
-    except Exception as e:
-        print('Dill deserialization failed:', str(e))
-        try:
-            func = cloudpickle.loads(data['function']) if cloudpickle else None
-            print('Successfully deserialized function with cloudpickle')
-        except Exception as e2:
-            print('Cloudpickle deserialization failed:', str(e2))
-            # Try source code fallback
-            if func_info.get('source'):
-                print('Using source code fallback')
-                # Remove @cluster decorator from source
-                import textwrap
-                source = func_info['source']
-                lines = source.split('\n')
-                clean_lines = []
-                for line in lines:
-                    if not line.strip().startswith('@'):
-                        clean_lines.append(line)
-                clean_source = '\n'.join(clean_lines)
-                clean_source = textwrap.dedent(clean_source)
-                
-                # Create function from source
-                namespace = {}
-                exec(clean_source, namespace)
-                func = namespace[func_info['name']]
-                print('Successfully created function from source code')
-            else:
-                raise Exception('All deserialization methods failed')
-    
-    # _ser, not stdlib pickle: args may carry classes defined in
-    # the caller's __main__, which pickle can only store by name.
-    args = _ser.loads(data['args'])
-    kwargs = _ser.loads(data['kwargs'])
-    
-    # Pass data to VENV2 for execution. _ser (dill/cloudpickle) is
-    # required here: stdlib pickle cannot serialize a function that
-    # is not importable by name in this interpreter.
+    # The function, its arguments and (in stage 3) its result are
+    # handed on as bytes and never rebuilt here. This environment
+    # holds clustrix's serializers and nothing else, so rebuilding
+    # them needed every package they touch: a numpy array as an
+    # argument or a return value died in this stage on
+    # ModuleNotFoundError. Re-serializing the rebuilt function also
+    # dropped every project-local module the caller had embedded by
+    # value. VENV2 is the one place the user's objects exist.
+    _handoff = {}
+    for _name in ('function', 'args', 'kwargs'):
+        if not isinstance(data.get(_name), bytes):
+            raise ValueError('function_data.pkl has no serialized ' + _name)
+        _handoff[_name + '_bytes'] = data[_name]
     with open('function_deserialized.pkl', 'wb') as f:
-        if clean_source is not None:
-            # Function was created from source code, pass the source
-            _ser.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)
-        else:
-            # Function was deserialized from binary, pass the function object
-            _ser.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)
+        _ser.dump(_handoff, f, protocol=4)
     
     print('VENV1 - Function data prepared for VENV2 using', _ser.__name__)
     
@@ -169,6 +124,7 @@ except Exception as e:
                 _sigf.write(_tag)
     raise
 "
+_clustrix_rc=$?; [ "$_clustrix_rc" -eq 0 ] || exit "$_clustrix_rc"
 
 # Step 2: Use VENV2 to execute the function
 deactivate
@@ -202,23 +158,26 @@ try:
     with open('function_deserialized.pkl', 'rb') as f:
         exec_data = _ser.load(f)
     
-    if 'func' in exec_data:
-        # Function object was passed
-        func = exec_data['func']
-    elif 'source' in exec_data:
-        # Source code was passed, recreate function
-        print('Recreating function from source code in VENV2')
-        namespace = {}
-        exec(exec_data['source'], namespace)
-        func = namespace[exec_data['func_name']]
-    else:
-        raise Exception('No function or source code found')
-    
-    args = exec_data['args']
-    kwargs = exec_data['kwargs']
+    # The caller's own bytes: dill first, cloudpickle when dill
+    # cannot, which is the order the caller's serializer uses. When
+    # neither can, both reasons are reported -- they usually differ,
+    # and dill's tends to name the object it could not rebuild.
+    try:
+        func = _ser.loads(exec_data['function_bytes'])
+    except Exception as _first:
+        try:
+            import cloudpickle
+            func = cloudpickle.loads(exec_data['function_bytes'])
+        except Exception as _second:
+            raise RuntimeError(
+                'Could not deserialize the function on the worker. '
+                + _ser.__name__ + ' said ' + type(_first).__name__ + ': ' + str(_first)
+                + '; cloudpickle said ' + type(_second).__name__ + ': ' + str(_second)
+            ) from _second
+    args = _ser.loads(exec_data['args_bytes'])
+    kwargs = _ser.loads(exec_data['kwargs_bytes'])
     
     # Execute the function
-    print('Executing function with args:', args)
     result = func(*args, **kwargs)
     print('Function execution completed successfully')
     
@@ -248,10 +207,11 @@ except Exception as e:
                 _sigf.write(_tag)
     raise
 "
+_clustrix_rc=$?; [ "$_clustrix_rc" -eq 0 ] || exit "$_clustrix_rc"
 
 # Step 3: Use VENV1 to serialize the result
 # No deactivation needed for conda run
-. /remote/job/venv1_serialization/bin/activate
+. /remote/job/venv1_serialization/bin/activate || exit 1
 python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
@@ -271,18 +231,16 @@ except ImportError:
 import sys
 import traceback
 
-print('VENV1 - Serializing result')
+print('VENV1 - Signing result')
 
 try:
     import os
     if not os.path.exists('result_raw.pkl'):
         raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')
+    # Bytes in, the same bytes out: see stage 1 for why the result
+    # is not rebuilt in this environment.
     with open('result_raw.pkl', 'rb') as f:
-        result = _ser.load(f)
-    
-    print('Result loaded from VENV2:', type(result))
-    
-    _payload_bytes = _ser.dumps(result, protocol=4)
+        _payload_bytes = f.read()
     with open('result.pkl', 'wb') as f:
         f.write(_payload_bytes)
     

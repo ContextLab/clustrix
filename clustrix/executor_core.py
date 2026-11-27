@@ -225,7 +225,7 @@ class ClusterExecutor:
                     # Cleanup
                     if self.config.cleanup_on_success:
                         self.connection_manager.execute_remote_command(
-                            f"rm -rf {remote_dir}"
+                            f"rm -rf {shlex.quote(remote_dir)}"
                         )
 
                     del self.scheduler_manager.active_jobs[job_id]
@@ -249,7 +249,12 @@ class ClusterExecutor:
                     raise original_exception
                 else:
                     # Fallback to RuntimeError with log
-                    raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
+                    summary = self.scheduler_manager.status_manager.failure_summary(
+                        job_id, self.scheduler_manager.active_jobs
+                    )
+                    raise RuntimeError(
+                        f"Job {job_id} failed{summary}. Error log:\n{error_log}"
+                    )
 
             if deadline is not None and time.monotonic() >= deadline:
                 # The job is left alone deliberately: it may still be

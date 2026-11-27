@@ -169,60 +169,61 @@ class SchedulerManager:
         """
 
         if getattr(self.config, "use_two_venv", True):
-            try:
-                from .utils import enhanced_setup_two_venv_environment
+            from .utils import enhanced_setup_two_venv_environment
 
-                logger.info(
-                    "Setting up enhanced two-venv environment with GPU detection"
-                )
+            logger.info("Setting up enhanced two-venv environment with GPU detection")
 
-                # Use threading to implement timeout for venv setup
-                venv_info = None
-                exception_occurred = None
+            # Use threading to implement timeout for venv setup
+            venv_info = None
+            exception_occurred = None
 
-                def setup_venv():
-                    nonlocal venv_info, exception_occurred
-                    try:
-                        venv_info = enhanced_setup_two_venv_environment(
-                            self.connection_manager.ssh_client,
-                            remote_job_dir,
-                            func_data["requirements"],
-                            self.config,
-                        )
-                    except Exception as e:
-                        exception_occurred = e
-
-                setup_thread = threading.Thread(target=setup_venv)
-                setup_thread.daemon = True
-                setup_thread.start()
-                setup_thread.join(
-                    timeout=getattr(self.config, "venv_setup_timeout", 300)
-                )
-
-                if setup_thread.is_alive():
-                    raise TimeoutError("Two-venv setup timed out")
-                elif exception_occurred:
-                    raise exception_occurred
-                elif venv_info:
-                    # Update config with venv paths for job script generation
-                    logger.info(
-                        f"Two-venv setup successful, using: "
-                        f"{venv_info['venv1_python']}"
+            def setup_venv():
+                nonlocal venv_info, exception_occurred
+                try:
+                    venv_info = enhanced_setup_two_venv_environment(
+                        self.connection_manager.ssh_client,
+                        remote_job_dir,
+                        func_data["requirements"],
+                        self.config,
                     )
-                    return config_for_job_script(self.config, venv_info)
-                else:
-                    raise RuntimeError("Two-venv setup returned no result")
+                except Exception as e:
+                    exception_occurred = e
 
-            except Exception as e:
-                logger.warning(
-                    f"Two-venv setup failed, falling back to basic setup: {e}"
+            timeout = getattr(self.config, "venv_setup_timeout", 300)
+            setup_thread = threading.Thread(target=setup_venv)
+            setup_thread.daemon = True
+            setup_thread.start()
+            setup_thread.join(timeout=timeout)
+
+            # A failure here used to be logged and followed by the
+            # single-venv build below. That environment holds the serializers
+            # and nothing else, so the job then ran without the packages the
+            # caller has -- or, when that build failed too, outside any
+            # environment at all -- and whatever happened next was reported
+            # instead of the real cause. `use_two_venv=False` is how to ask
+            # for the bare environment on purpose.
+            if setup_thread.is_alive():
+                raise TimeoutError(
+                    f"Building the remote Python environment took longer than "
+                    f"{timeout}s (config.venv_setup_timeout). It may still be "
+                    f"running on the cluster; the build is locked, so a second "
+                    f"submission will wait for it rather than start again. "
+                    f"Raise venv_setup_timeout for a large environment."
                 )
-        else:
-            logger.info("Two-venv setup disabled, using basic environment setup")
+            if exception_occurred:
+                raise exception_occurred
+            if not venv_info:
+                raise RuntimeError("Two-venv setup returned no result")
+            logger.info(
+                f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+            )
+            return config_for_job_script(self.config, venv_info)
 
-        # Fall back to the single-venv layout -- which means actually building
-        # that venv. Setting venv_info = None without this leaves the generated
-        # script activating a virtualenv nobody created.
+        logger.info("Two-venv setup disabled, using basic environment setup")
+
+        # The single-venv layout -- which means actually building that venv.
+        # Setting venv_info = None without this leaves the generated script
+        # activating a virtualenv nobody created.
         #
         # Unless the user named an environment. Then the generated script runs
         # `conda run -n <name>` and never sources `venv/bin/activate`, so
@@ -270,11 +271,20 @@ class SchedulerManager:
         self.connection_manager.create_remote_file(script_path, script_content)
 
         # Submit job
-        cmd = f"cd {remote_job_dir} && sbatch job.sh"
+        # --parsable prints "<jobid>" or "<jobid>;<cluster>" and nothing else.
+        # Taking the last word of the human-readable line meant that when
+        # sbatch refused the job -- unknown partition, memory above the node
+        # limit -- stdout was empty and this died on an IndexError that named
+        # neither sbatch nor its reason.
+        cmd = f"cd {shlex.quote(remote_job_dir)} && sbatch --parsable job.sh"
         stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-
-        # Extract job ID from sbatch output
-        job_id = stdout.strip().split()[-1]
+        job_id = stdout.strip().split(";")[0].strip()
+        if not job_id.isdigit():
+            raise RuntimeError(
+                "sbatch did not accept the job. It said: "
+                f"{(stderr.strip() or stdout.strip() or 'nothing')!r}. The job "
+                f"script is at {remote_job_dir}/job.sh on the cluster."
+            )
 
         # Store job info
         self.active_jobs[job_id] = {
@@ -308,21 +318,47 @@ class SchedulerManager:
         script_path = f"{remote_job_dir}/job.sh"
         self.connection_manager.create_remote_file(script_path, script_content)
 
-        # Execute in background
+        # Run in the background, detached from this channel, and have the
+        # wrapper record how the script ended. Two things depend on that
+        # record. Completion: ``job.exit`` is written after everything else,
+        # so its presence means result.pkl and its signature are whole --
+        # polling for result.pkl alone raced the signature, which is written
+        # a moment later. Failure: a job that is killed, or calls
+        # ``sys.exit``, leaves no error report and may leave nothing on
+        # stderr; without an exit status the only verdict available was
+        # "still running", until job_wait_timeout a day later.
+        quoted_dir = shlex.quote(remote_job_dir)
+        #
+        # The braces matter. `cd X && nohup ... &` backgrounds the whole
+        # and-list in a subshell that still holds this channel's stdout and
+        # stderr, so a real sshd kept the channel open -- and this call
+        # blocked -- until the job had finished.
         cmd = (
-            f"cd {remote_job_dir} && "
-            "nohup bash job.sh > job.out 2> job.err < /dev/null &"
+            f"cd {quoted_dir} && {{ "
+            "nohup bash -c 'bash job.sh > job.out 2> job.err; "
+            "echo $? > job.exit.tmp; mv job.exit.tmp job.exit' "
+            "> /dev/null 2>&1 < /dev/null & echo $!; }"
         )
-        stdout, stderr = self.connection_manager.execute_remote_command(cmd)
+        stdout, stderr = self.connection_manager.execute_remote_command(cmd, check=True)
+        pid = stdout.strip().splitlines()[-1] if stdout.strip() else ""
+        if not pid.isdigit():
+            raise RuntimeError(
+                f"Could not start the job in {remote_job_dir}: the remote shell "
+                f"did not report a process id (got {stdout!r}; stderr: "
+                f"{stderr.strip()!r})."
+            )
 
-        # Use timestamp as job ID for SSH
-        job_id = f"ssh_{int(time.time())}"
+        # Named after the job directory, which is unique. A timestamp alone
+        # gave two submissions in the same second the same id, and the second
+        # silently replaced the first in active_jobs.
+        job_id = "ssh_" + os.path.basename(remote_job_dir)[len("job_") :]
 
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
             "result_key": result_key,
             "status": "running",
             "submit_time": time.time(),
+            "pid": int(pid),
         }
 
         return job_id
@@ -342,7 +378,26 @@ class SchedulerManager:
     def cancel_job(self, job_id: str):
         """Cancel a running job."""
         if self.config.cluster_type == "slurm":
-            self.connection_manager.execute_remote_command(f"scancel {job_id}")
+            self.connection_manager.execute_remote_command(
+                f"scancel {shlex.quote(str(job_id))}", check=True
+            )
+        elif self.config.cluster_type == "ssh":
+            pid = (self.active_jobs.get(job_id) or {}).get("pid")
+            if pid is None:
+                raise ValueError(
+                    f"Cannot cancel {job_id}: this executor did not start it, "
+                    "so it does not know which remote process it is."
+                )
+            # The whole tree, listed before anything is signalled: the
+            # recorded pid is the wrapper shell, and killing only that leaves
+            # job.sh and the Python running the function alive. Killing the
+            # leaves first is no better -- job.sh would move on to its next
+            # command before its own turn came.
+            self.connection_manager.execute_remote_command(
+                '_clustrix_tree() { echo "$1"; for _c in $(pgrep -P "$1"); do '
+                '_clustrix_tree "$_c"; done; }; '
+                f"kill -TERM $(_clustrix_tree {int(pid)}) 2>/dev/null; true"
+            )
 
         if job_id in self.active_jobs:
             del self.active_jobs[job_id]

@@ -6,7 +6,8 @@
 #SBATCH --mem=4G
 #SBATCH --time=01:00:00
 #SBATCH --partition=gpu
-module load anaconda
+if ! type module >/dev/null 2>&1; then for _clustrix_m in /etc/profile.d/modules.sh /usr/share/modules/init/bash /etc/profile.d/lmod.sh /etc/profile.d/z00_lmod.sh /usr/share/lmod/lmod/init/bash; do if [ -r "$_clustrix_m" ]; then . "$_clustrix_m"; break; fi; done; fi
+module load anaconda || { echo 'clustrix: module load anaconda failed, so the job was not run. Check module_loads.' >&2; exit 1; }
 export OMP_NUM_THREADS=4
 set -u
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
@@ -41,7 +42,7 @@ fi
 # will run the job, before any of it runs.
 conda run -n prod python -c "
 import sys
-_want = (3, 11)
+_want = (3, 13)
 _got = sys.version_info[:2]
 if _got != _want:
     sys.stderr.write(

@@ -20,8 +20,6 @@ def _ast_to_string(node) -> str:
         return "call"
     elif isinstance(node, ast.Constant):
         return str(node.value)
-    elif isinstance(node, ast.Num):  # Python < 3.8
-        return str(node.n)
     else:
         return str(type(node).__name__)
 
@@ -294,8 +292,6 @@ class SafeRangeEvaluator(ast.NodeVisitor):
         """Safely evaluate an AST node to get integer value."""
         if isinstance(node, ast.Constant):
             return node.value if isinstance(node.value, int) else None
-        elif isinstance(node, ast.Num):  # Python < 3.8
-            return node.n if isinstance(node.n, int) else None
         elif isinstance(node, ast.Name):
             return (
                 self.local_vars.get(node.id)
