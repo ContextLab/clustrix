@@ -726,3 +726,543 @@ class TestLinksOnASharedFilesystem:
             str(table): table.stat().st_size,
             str(folder): -1,
         }
+
+
+# -- #176: what an adversarial review found ---------------------------------
+
+
+def calls_an_installed_library():
+    import installed_fakelib  # noqa: F401 - imported by the test first
+
+    return installed_fakelib.login()
+
+
+class TestTheHomeDirectoryIsNotAProject:
+    """S1. With the home directory as the working directory and no git
+    repository, the "project" was the home directory, so a constant in a
+    library under ``~/.local/lib/.../site-packages`` naming a token file
+    got that file uploaded."""
+
+    @pytest.fixture
+    def at_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / ".kaggle").mkdir(parents=True)
+        (home / ".kaggle" / "kaggle.json").write_text('{"key": "k"}')
+        (home / "notes.txt").write_text("plain\n")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.chdir(home)
+        return home
+
+    def test_home_and_what_contains_it_are_no_project_root(self, at_home, monkeypatch):
+        assert auto_stage.project_root() is None
+        monkeypatch.chdir(at_home.parent)
+        assert auto_stage.project_root() is None
+        assert auto_stage.project_root(Path("/")) is None
+
+    def test_nothing_named_in_code_is_found_from_there(self, at_home, caplog):
+        def names_a_file_in_home():
+            return open("notes.txt").read(), open("~/.kaggle/kaggle.json").read()
+
+        with caplog.at_level("INFO", logger="clustrix.auto_stage"):
+            found = auto_stage.discover(names_a_file_in_home, (), {})
+
+        assert found == []
+        assert "not a project" in caplog.text
+
+    def test_arguments_and_listed_data_are_still_found(self, at_home):
+        found = _found(
+            auto_stage.discover(takes_paths, ("notes.txt",), {}, extra=["notes.txt"])
+        )
+
+        assert found["notes.txt"].explicit
+
+    def test_a_constant_is_refused_when_there_is_no_project(self, at_home):
+        candidate = auto_stage.Candidate(
+            "notes.txt", at_home / "notes.txt", "the code of f", False
+        )
+
+        assert "no project directory" in auto_stage._refusal(candidate, None)
+
+    def test_installed_code_is_not_project_code_even_inside_the_project(
+        self, project, monkeypatch
+    ):
+        """A virtual environment inside the project puts site-packages
+        under the project root; what is installed there is still not the
+        user's code."""
+        import sys
+
+        site = project / "venv" / "lib" / "python3" / "site-packages"
+        site.mkdir(parents=True)
+        module = _import_from(
+            site / "installed_fakelib.py",
+            "def login():\n    return open('data/table.csv').read()\n",
+        )
+        monkeypatch.setitem(sys.modules, "installed_fakelib", module)
+        root = auto_stage.project_root()
+
+        assert Path(module.login.__code__.co_filename).is_relative_to(root)
+        assert not auto_stage._is_project_function(module.login, root)
+        assert auto_stage.discover(calls_an_installed_library, (), {}) == []
+        # ... and decorating the library's function does not make it so.
+        assert auto_stage.discover(module.login, (), {}) == []
+
+    def test_the_same_code_outside_site_packages_is_searched(self, project):
+        module = _import_from(
+            project / "ownlib.py",
+            "def login():\n    return open('data/table.csv').read()\n",
+        )
+
+        assert TABLE in _found(auto_stage.discover(module.login, (), {}))
+
+
+class TestCredentialsAreRecognised:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            ".cache/huggingface/token",
+            ".huggingface/token",
+            "hf_home/huggingface/token",
+            ".pgpass",
+            ".my.cnf",
+            "prod.env",
+            ".env",
+            ".vault-token",
+            ".netrc",
+            "_netrc",
+            ".kaggle/kaggle.json",
+            "elsewhere/kaggle.json",
+            ".config/gcloud/application_default_credentials.json",
+            "application_default_credentials.json",
+            ".docker/config.json",
+            ".npmrc",
+            ".pypirc",
+            ".aws/credentials",
+            ".aws/config",
+            ".azure/accessTokens.json",
+            ".config/gcloud/access_tokens.db",
+            "server.pem",
+            "server.key",
+            "id_rsa",
+            "id_rsa.pub",
+            "id_ed25519",
+            "id_ecdsa_sk",
+        ],
+    )
+    def test_by_name(self, tmp_path, name):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+        candidate = auto_stage.Candidate(str(path), path, "argument 'path'", True)
+
+        assert "credential" in auto_stage._refusal(candidate, tmp_path)
+
+    def test_a_service_account_key_by_what_it_says_it_is(self, tmp_path):
+        key = tmp_path / "my-project-1a2b3c.json"
+        key.write_text('{\n  "type" : "service_account",\n  "private_key": "..."\n}')
+        ordinary = tmp_path / "settings.json"
+        ordinary.write_text('{"type": "experiment", "account": "service"}')
+        big = tmp_path / "big.json"
+        big.write_text('{"type": "service_account", "pad": "' + "x" * 70000 + '"}')
+
+        refused = {
+            path.name: auto_stage._refusal(
+                auto_stage.Candidate(str(path), path, "argument", True), tmp_path
+            )
+            for path in (key, ordinary, big)
+        }
+
+        assert "credential" in refused["my-project-1a2b3c.json"]
+        assert refused["settings.json"] is None
+        # Only a small file is opened to look; this is the stated limit.
+        assert refused["big.json"] is None
+
+    def test_ordinary_data_is_not(self, tmp_path):
+        for name in ("table.csv", "environment.yml", "tokens.txt", "keys.npy"):
+            path = tmp_path / name
+            path.write_text("x")
+            candidate = auto_stage.Candidate(str(path), path, "argument", True)
+            assert auto_stage._refusal(candidate, tmp_path) is None, name
+
+
+class TestALinkedParentDoesNotHideACredential:
+    """S2. ``keys -> ~/.ssh``: neither ``keys/aws-prod`` nor ``keys`` is
+    itself credential-shaped, and both were uploaded."""
+
+    @pytest.fixture
+    def linked(self, project, tmp_path):
+        ssh = tmp_path / "home" / ".ssh"
+        ssh.mkdir(parents=True)
+        (ssh / "aws-prod").write_text("PRIVATE KEY MATERIAL\n")
+        (ssh / "config").write_text("Host x\n")
+        (project / "keys").symlink_to(ssh)
+        return project
+
+    def test_a_file_reached_through_a_linked_directory(self, linked):
+        (candidate,) = auto_stage.discover(takes_paths, ("keys/aws-prod",), {})
+
+        refusal = auto_stage._refusal(candidate, auto_stage.project_root())
+
+        assert "credential" in refusal and ".ssh/aws-prod" in refusal
+
+    def test_the_linked_directory_itself(self, linked):
+        (candidate,) = auto_stage.discover(takes_folder, ("keys",), {})
+
+        assert "credential" in auto_stage._refusal(candidate, auto_stage.project_root())
+
+    def test_members_are_judged_by_their_real_path_too(self, linked, tmp_path):
+        """Walking a directory reached through a link: every member's real
+        path is under ``.ssh``, whatever the path walked says."""
+        walked = linked / "keys"
+        left_out = {}
+
+        files = auto_stage._files_under(walked, left_out=left_out)
+
+        assert files == []
+        assert {m.name for m in left_out["credential"]} == {"aws-prod", "config"}
+
+
+class TestTheSameDataNotJustTheSamePath:
+    """S4. Against the in-process SSH server, which shares this disk, so
+    every local path "exists on the cluster". What differs is produced the
+    only way one disk allows: the file changes after this side looked."""
+
+    connected = TestOnACluster.connected
+
+    @pytest.fixture(autouse=True)
+    def forget(self):
+        auto_stage._SAME_IN_PLACE.clear()
+        auto_stage._LOCAL_SHA256.clear()
+
+    def test_the_cluster_reports_sizes_and_hashes_of_what_it_holds(
+        self, project, connected
+    ):
+        import hashlib
+
+        connection, _, _ = connected
+        folder, table = project / "data", project / "data" / "table.csv"
+        (folder / "sp ace 'q\" $(x).txt").write_text("odd name\n")
+        (folder / "__pycache__").mkdir()
+        (folder / "__pycache__" / "x.pyc").write_bytes(b"never staged")
+
+        listing = auto_stage._remote_listing(connection, [str(folder)])[str(folder)]
+        hashes = auto_stage._remote_hashes(
+            connection, [(str(folder), True), (str(table), False)]
+        )
+
+        assert listing == {
+            "table.csv": 8,
+            "subjects/s1.txt": 10,
+            "subjects/s2.txt": 10,
+            "sp ace 'q\" $(x).txt": 9,
+        }
+        digest = hashlib.sha256(table.read_bytes()).hexdigest()
+        assert hashes[str(table)] == {"": digest}
+        assert hashes[str(folder)]["table.csv"] == digest
+        assert set(hashes[str(folder)]) == set(listing)
+
+    def test_identical_data_is_used_in_place_and_the_plan_says_why(
+        self, project, connected, caplog
+    ):
+        connection, config, remote = connected
+
+        with caplog.at_level("INFO", logger="clustrix.auto_stage"):
+            _, _, plan = auto_stage.prepare(
+                connection, config, takes_paths, (project / "data" / "table.csv",), {}
+            )
+            _, _, folder_plan = auto_stage.prepare(
+                connection, config, takes_folder, (str(project / "data"),), {}
+            )
+
+        assert plan.inputs[0].how == "in place"
+        assert "same size and sha256" in plan.inputs[0].why
+        assert "same 3 file(s) by size and sha256" in folder_plan.inputs[0].why
+        assert "in place (the cluster has it at the same path: same size" in (
+            caplog.text
+        )
+        assert not (remote / "work" / auto_stage.STORE_DIRECTORY).exists()
+
+    def test_a_file_of_the_same_size_and_different_content_stops_the_call(
+        self, project, connected
+    ):
+        """Hashed here, then rewritten with the same size and the same
+        modification time: what the cluster hashes is no longer what this
+        side hashed, which is what a stale copy on a cluster is."""
+        from clustrix.staging import StagingError
+
+        connection, config, remote = connected
+        table = project / "data" / "table.csv"
+        before = table.stat()
+        auto_stage._local_sha256(table)
+        table.write_text("a,b\n9,9\n")
+        os.utime(table, ns=(before.st_atime_ns, before.st_mtime_ns))
+        assert table.stat().st_size == before.st_size
+
+        with pytest.raises(StagingError) as refused:
+            auto_stage.prepare(connection, config, takes_paths, (table,), {})
+
+        message = str(refused.value)
+        assert "not the same data" in message and "different content" in message
+        assert "no_data" in message
+
+    def test_a_directory_is_compared_member_by_member(self, project, connected):
+        connection, _, _ = connected
+        folder = project / "data"
+        candidate = auto_stage.Candidate(str(folder), folder, "argument", True)
+        files = auto_stage._files_under(folder)
+
+        def verdict():
+            auto_stage._SAME_IN_PLACE.clear()
+            return auto_stage._compare_in_place(connection, [(candidate, files, 0)])[
+                folder
+            ]
+
+        assert verdict().same is True
+
+        # Same names, same sizes, one file's bytes changed behind this
+        # side's hash of it.
+        member = folder / "subjects" / "s1.txt"
+        before = member.stat()
+        member.write_text("SUBJECT 1\n")
+        os.utime(member, ns=(before.st_atime_ns, before.st_mtime_ns))
+        changed = verdict()
+        assert changed.same is False
+        assert changed.detail == "subjects/s1.txt has different content"
+
+        # A member whose size on the cluster is no longer the size listed
+        # here is found without hashing anything.
+        files[0] = ("subjects/s1.txt", folder / "table.csv")
+        resized = verdict()
+        assert resized.same is False and "subjects/s1.txt is 10 B there" in (
+            resized.detail
+        )
+
+    def test_listings_differ_by_names_and_sizes_but_not_by_what_was_left_out(self):
+        here = {"a.csv": 3, "b.csv": 4, "c.csv": 5}
+        there = {"a.csv": 3, "b.csv": 40, "extra.csv": 1, ".env": 9}
+
+        differences = auto_stage._listing_differences(
+            here, there, lambda relative: relative == ".env"
+        )
+
+        assert differences == [
+            "c.csv is not there",
+            "extra.csv is only there",
+            "b.csv is 40 B there and 4 B here",
+        ]
+        assert auto_stage._listing_differences(here, dict(here), bool) == []
+
+    def test_a_cluster_that_cannot_hash_gets_an_upload_not_the_benefit_of_the_doubt(
+        self, project, tmp_path
+    ):
+        """A real remote with no ``sha256sum`` and no ``shasum`` on its
+        PATH: the tools the rest of staging needs are there, those two are
+        not."""
+        import shutil
+
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        for tool in ("sh", "find", "wc", "mkdir", "chmod", "stat", "touch", "mv"):
+            (tools / tool).symlink_to(shutil.which(tool))
+        for tool in ("rm", "sleep", "cat", "ls", "test", "echo", "pwd", "printf"):
+            (tools / tool).symlink_to(shutil.which(tool))
+        remote = tmp_path / "remote"
+        remote.mkdir()
+        table = project / "data" / "table.csv"
+        with LocalSSHServer(
+            root=str(remote), password="s3cret", env={"PATH": str(tools)}
+        ) as server:
+            config = ClusterConfig(
+                cluster_type="ssh",
+                cluster_host=server.host,
+                cluster_port=server.port,
+                username="tester",
+                password="s3cret",
+                ssh_host_key_policy="auto_add",
+                remote_work_dir=str(remote / "work"),
+            )
+            with ClusterExecutor(config) as executor:
+                executor.connect()
+                connection = executor.connection_manager
+                assert auto_stage._remote_hashes(connection, [(str(table), False)]) == {
+                    str(table): None
+                }
+
+                args, _, plan = auto_stage.prepare(
+                    connection, config, takes_paths, (table,), {}
+                )
+
+        (staged,) = plan.inputs
+        assert staged.how == "uploaded"
+        assert "could not compute a sha256" in staged.why
+        assert Path(args[0]).read_text() == "a,b\n1,2\n" and args[0] != table
+
+    def test_a_comparison_is_made_once_per_session_and_again_after_an_edit(
+        self, project, connected
+    ):
+        connection, config, _ = connected
+        table = project / "data" / "table.csv"
+
+        def why():
+            return (
+                auto_stage.prepare(connection, config, takes_paths, (table,), {})[2]
+                .inputs[0]
+                .why
+            )
+
+        assert "same size and sha256" in why()
+        assert "compared earlier in this session" in why()
+        table.write_text("a,b\n1,2\n3,4\n")
+        assert "same size and sha256" in why()
+
+
+class TestNamesClustrixWritesItself:
+    """S5. ``result.pkl`` passed as an argument was linked over the job's
+    own ``result.pkl``."""
+
+    connected = TestOnACluster.connected
+
+    @pytest.mark.parametrize(
+        "name",
+        ["result.pkl", "job.sh", "function_data.pkl", "job.out", "slurm-12.err"],
+    )
+    def test_a_colliding_relative_input_is_refused_by_name(
+        self, project, connected, name
+    ):
+        from clustrix.staging import StagingError
+
+        connection, config, remote = connected
+        (project / name).write_text("mine\n")
+
+        with pytest.raises(StagingError) as refused:
+            auto_stage.prepare(connection, config, takes_paths, (name,), {})
+
+        assert repr(name) in str(refused.value) and "collides" in str(refused.value)
+        assert not (remote / "work" / auto_stage.STORE_DIRECTORY).exists()
+
+    def test_a_directory_named_like_one_is_refused_too(self, project, connected):
+        from clustrix.staging import StagingError
+
+        connection, config, _ = connected
+        (project / "venv2_execution").mkdir()
+        (project / "venv2_execution" / "x.txt").write_text("x")
+
+        with pytest.raises(StagingError):
+            auto_stage.prepare(
+                connection, config, takes_paths, ("venv2_execution/x.txt",), {}
+            )
+
+    def test_the_same_name_by_absolute_path_or_below_a_directory_is_fine(
+        self, project, connected
+    ):
+        connection, config, _ = connected
+        (project / "result.pkl").write_text("mine\n")
+        (project / "data" / "result.pkl").write_text("mine too\n")
+
+        _, _, plan = auto_stage.prepare(
+            connection,
+            config,
+            takes_paths,
+            (str(project / "result.pkl"),),
+            {"options": ["data/result.pkl"]},
+        )
+
+        assert {item.link for item in plan.inputs} == {None, "data/result.pkl"}
+
+    def test_every_file_a_generated_job_script_names_is_reserved(self):
+        """The list is in ``clustrix.utils`` beside the generators. This
+        reads what they generate, so a new file there fails here."""
+        import re
+
+        from clustrix.utils import create_job_script, is_reserved_job_directory_name
+
+        config = ClusterConfig(cluster_type="ssh", remote_work_dir="/w")
+        named = set()
+        for cluster_type in ("ssh", "slurm"):
+            script = create_job_script(
+                cluster_type,
+                {"cores": 1, "memory": "1GB", "time": "00:01:00"},
+                "/w/job_1",
+                config,
+            )
+            named |= set(re.findall(r"open\('([^'/]+)'", script))
+            named |= {
+                os.path.basename(path)
+                for path in re.findall(r"/w/job_1/([\w.%-]+)", script)
+            }
+
+        assert {"function_data.pkl", "result.pkl", "error.pkl"} <= named
+        unreserved = {
+            name
+            for name in named
+            if not is_reserved_job_directory_name(name.replace("%j", "1"))
+        }
+        assert unreserved == set()
+
+
+class TestAReadOnlyInputThatWasMeantAsAnOutput:
+    """S6. The sentence added to a job's PermissionError, and when."""
+
+    def _plan(self, **changes):
+        item = auto_stage.StagedInput(
+            Path("/home/me/project/data/out.txt"),
+            "/remote/work/data/abc/out.txt",
+            7,
+            "uploaded",
+            "argument 'out_path'",
+            link="data/out.txt",
+        )
+        for name, value in changes.items():
+            setattr(item, name, value)
+        return auto_stage.DataPlan([item])
+
+    @pytest.mark.parametrize(
+        "failed",
+        [
+            "data/out.txt",
+            "./data/out.txt",
+            "/remote/work/job_1_ab/data/out.txt",
+            "/remote/work/data/abc/out.txt",
+        ],
+    )
+    def test_the_staged_path_however_the_job_spelled_it(self, failed):
+        note = auto_stage.staged_read_only(
+            PermissionError(13, "Permission denied", failed), self._plan()
+        )
+
+        assert "read-only" in note and "no_data=['data/out.txt']" in note
+
+    def test_a_file_inside_a_staged_directory(self):
+        plan = self._plan(link="results", remote="/remote/work/data/abc/results")
+
+        note = auto_stage.staged_read_only(
+            PermissionError(13, "Permission denied", "results/run1/metrics.json"),
+            plan,
+        )
+
+        assert "no_data=['results']" in note
+
+    def test_an_absolute_argument_is_named_by_its_local_path(self):
+        plan = self._plan(link=None)
+
+        note = auto_stage.staged_read_only(
+            PermissionError(13, "Permission denied", "/remote/work/data/abc/out.txt"),
+            plan,
+        )
+
+        assert "no_data=['/home/me/project/data/out.txt']" in note
+
+    def test_other_paths_and_inputs_used_in_place_get_no_note(self):
+        denied = PermissionError(13, "Permission denied", "/etc/shadow")
+        assert auto_stage.staged_read_only(denied, self._plan()) is None
+        assert auto_stage.staged_read_only(
+            PermissionError("no name"), self._plan()
+        ) is (None)
+        in_place = self._plan(how="in place")
+        assert (
+            auto_stage.staged_read_only(
+                PermissionError(13, "Permission denied", "data/out.txt"), in_place
+            )
+            is None
+        )
+        similar = PermissionError(13, "Permission denied", "data/out.txt.bak")
+        assert auto_stage.staged_read_only(similar, self._plan()) is None

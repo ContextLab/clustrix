@@ -163,12 +163,29 @@ SENSITIVE_PATTERNS: Tuple[str, ...] = (
     "secrets",
     "secrets.*",
     "*.kdbx",
+    # ``prod.env``, ``staging.env``: the same file as ``.env`` with a name.
+    "*.env",
+    ".pgpass",
+    ".my.cnf",
+    ".vault-token",
+    "kaggle.json",
+    # What ``gcloud auth application-default login`` writes. A service-account
+    # key can be called anything, so those are recognised by what they
+    # contain: see ``_is_service_account_key``.
+    "application_default_credentials.json",
+    # A pattern ending in ``/*`` also refuses the directory itself.
     "*/.ssh/*",
     "*/.aws/*",
+    "*/.azure/*",
     "*/.gnupg/*",
     "*/.kube/*",
     "*/.docker/*",
+    "*/.kaggle/*",
     "*/.config/gcloud/*",
+    # ``~/.cache/huggingface/token``, ``$HF_HOME/token`` and the older
+    # ``~/.huggingface/token``.
+    "*huggingface/token",
+    "*huggingface/stored_tokens",
     # A git config carries the remote URL, and a remote URL is one of the
     # commonest places a personal access token ends up on disk.
     "*/.git/config",
@@ -194,8 +211,9 @@ def _digest_bytes(data: bytes) -> str:
     return hashlib.blake2b(data, digest_size=32).hexdigest()
 
 
-def _digest_file(path: Union[str, Path]) -> str:
-    hasher = hashlib.blake2b(digest_size=32)
+def _digest_file(path: Union[str, Path], algorithm: str = "") -> str:
+    """Digest of a file's content: BLAKE2b, or the ``hashlib`` name given."""
+    hasher = hashlib.new(algorithm) if algorithm else hashlib.blake2b(digest_size=32)
     with open(path, "rb") as handle:
         while True:
             block = handle.read(_HASH_CHUNK)
@@ -203,6 +221,25 @@ def _digest_file(path: Union[str, Path]) -> str:
                 break
             hasher.update(block)
     return hasher.hexdigest()
+
+
+#: A JSON file this small is opened to see whether it is a Google Cloud
+#: service-account key, which has no telling name. Real ones are about 2 kB.
+_SERVICE_ACCOUNT_KEY_MAX_BYTES = 64 * 1024
+
+_SERVICE_ACCOUNT_KEY_RE = re.compile(rb'"type"\s*:\s*"service_account"')
+
+
+def _is_service_account_key(path: Path) -> bool:
+    """Whether a small ``.json`` file says it is a service-account key."""
+    if path.suffix.lower() != ".json":
+        return False
+    try:
+        if not path.is_file() or path.stat().st_size > _SERVICE_ACCOUNT_KEY_MAX_BYTES:
+            return False
+        return bool(_SERVICE_ACCOUNT_KEY_RE.search(path.read_bytes()))
+    except OSError:
+        return False  # unreadable here: it cannot be uploaded either
 
 
 def _is_sensitive(path: Path) -> bool:
@@ -213,9 +250,12 @@ def _is_sensitive(path: Path) -> bool:
         if "/" in pattern:
             if fnmatch.fnmatch(full, pattern):
                 return True
+            # ``*/.ssh/*`` names what is inside; the directory is no better.
+            if pattern.endswith("/*") and fnmatch.fnmatch(full, pattern[:-2]):
+                return True
         elif fnmatch.fnmatch(name, pattern):
             return True
-    return False
+    return _is_service_account_key(path)
 
 
 def _validate_package_id(package_id: Any) -> str:
@@ -1001,13 +1041,15 @@ def _is_sensitive_target(path: Path) -> bool:
     """Credential check that a symlink cannot route around.
 
     ``data/notes`` -> ``~/.ssh/id_rsa`` is credential-shaped at the far end and
-    innocuous at the near one, so both ends are tested.
+    innocuous at the near one, so both ends are tested. The link need not be
+    the last component: with ``keys`` -> ``~/.ssh``, ``keys/aws-prod`` is not
+    itself a link and is a private key all the same. So the path is judged as
+    it was spelled and again with every link in it resolved.
     """
     if _is_sensitive(path):
         return True
-    if path.is_symlink():
-        return _is_sensitive(Path(os.path.realpath(str(path))))
-    return False
+    real = Path(os.path.realpath(str(path)))
+    return real != path and _is_sensitive(real)
 
 
 def _dedupe(collected: List[Tuple[str, Path]]) -> List[Tuple[str, Path]]:

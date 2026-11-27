@@ -21,6 +21,12 @@ from typing import Dict, Any, Optional
 
 from .utils import (
     DEFAULT_JOB_NAME,
+    JOB_EXIT_NAME,
+    JOB_FUNCTION_DATA_NAME,
+    JOB_RESULT_KEY_NAME,
+    JOB_SCRIPT_NAME,
+    JOB_STDERR_NAME,
+    JOB_STDOUT_NAME,
     create_job_script,
     resolve_named_environment,
     setup_remote_environment,
@@ -104,7 +110,7 @@ class SchedulerManager:
         )
         key = secrets.token_hex(32)
         self.connection_manager.create_remote_file(
-            f"{remote_job_dir}/.clustrix_result_key", key, mode=0o600
+            f"{remote_job_dir}/{JOB_RESULT_KEY_NAME}", key, mode=0o600
         )
         return key
 
@@ -145,7 +151,7 @@ class SchedulerManager:
             local_pickle_path = f.name
         try:
             self.connection_manager.upload_file(
-                local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+                local_pickle_path, f"{remote_job_dir}/{JOB_FUNCTION_DATA_NAME}"
             )
         finally:
             os.unlink(local_pickle_path)
@@ -303,7 +309,7 @@ class SchedulerManager:
         )
 
         # Upload and submit job script
-        script_path = f"{remote_job_dir}/job.sh"
+        script_path = f"{remote_job_dir}/{JOB_SCRIPT_NAME}"
         self.connection_manager.create_remote_file(script_path, script_content)
 
         # Submit job
@@ -312,7 +318,7 @@ class SchedulerManager:
         # sbatch refused the job -- unknown partition, memory above the node
         # limit -- stdout was empty and this died on an IndexError that named
         # neither sbatch nor its reason.
-        cmd = f"cd {shlex.quote(remote_job_dir)} && sbatch --parsable job.sh"
+        cmd = f"cd {shlex.quote(remote_job_dir)} && sbatch --parsable {JOB_SCRIPT_NAME}"
         stdout, stderr = self.connection_manager.execute_remote_command(cmd)
         job_id = stdout.strip().split(";")[0].strip()
         if not job_id.isdigit():
@@ -356,7 +362,7 @@ class SchedulerManager:
             config=updated_config,
         )
 
-        script_path = f"{remote_job_dir}/job.sh"
+        script_path = f"{remote_job_dir}/{JOB_SCRIPT_NAME}"
         self.connection_manager.create_remote_file(script_path, script_content)
 
         # Run in the background, detached from this channel, and have the
@@ -376,8 +382,9 @@ class SchedulerManager:
         # blocked -- until the job had finished.
         cmd = (
             f"cd {quoted_dir} && {{ "
-            "nohup bash -c 'bash job.sh > job.out 2> job.err; "
-            "echo $? > job.exit.tmp; mv job.exit.tmp job.exit' "
+            f"nohup bash -c 'bash {JOB_SCRIPT_NAME} > {JOB_STDOUT_NAME} "
+            f"2> {JOB_STDERR_NAME}; "
+            f"echo $? > {JOB_EXIT_NAME}.tmp; mv {JOB_EXIT_NAME}.tmp {JOB_EXIT_NAME}' "
             "> /dev/null 2>&1 < /dev/null & echo $!; }"
         )
         stdout, stderr = self.connection_manager.execute_remote_command(cmd, check=True)

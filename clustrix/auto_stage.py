@@ -18,8 +18,13 @@ named, and makes each one resolve on the cluster:
 A candidate counts only if it **exists on this machine**. What happens next
 depends on where it already is:
 
-* the same absolute path exists on the cluster with the same size (a shared
-  filesystem, or data already there): it is used **in place**, nothing moves;
+* the same absolute path exists on the cluster **and holds the same data**
+  (a shared filesystem, or data already there): it is used **in place**,
+  nothing moves. The same data means, for a file, the same size and the
+  same SHA-256, computed on the cluster; for a directory, the same files
+  with the same sizes and the same SHA-256 each. A path is not evidence:
+  where the cluster cannot hash, the input is uploaded; where it holds
+  something different, the call stops and says what differs;
 * otherwise the file is uploaded once into a content-addressed store under
   ``remote_work_dir`` -- a second call with the same file uploads nothing --
   and then either linked into each job's working directory at the same
@@ -38,6 +43,11 @@ directory) up to ``_HASH_LIMIT_BYTES`` in total; above that it is a digest
 of names, sizes and modification times, and the plan says so, because a
 change that preserves all three would then be served stale.
 
+The store is the owner's alone -- ``0700``, with copies ``0500`` and their
+files ``0400`` -- whatever the remote umask is, because a file that is
+private here must not become readable by every account on a cluster. A
+store left open by an earlier version is closed the next time it is used.
+
 A copy is uploaded under a private name, made **read-only**, marked with a
 ``.complete`` file and only then renamed to its identity. So a copy that
 is visible under its identity is whole, a job cannot alter what the next
@@ -53,11 +63,18 @@ What this does not do, on purpose
 
 * **It never uploads what the user's own context did not put in scope.** A
   path found in code must be inside the project (the git top level, else
-  the working directory) after resolving symlinks. A path passed as an
-  argument is the user's explicit choice and may be anywhere. Credential
-  files are refused in both cases, **and inside a directory**: a member
-  that looks like a credential is left out, named in a warning and in the
-  plan, and the rest of the directory is staged. ``no_data=[...]`` removes
+  the working directory) after resolving symlinks, and the code must be
+  the project's: nothing under ``site-packages`` or ``dist-packages`` is
+  searched. The home directory, a directory containing it and ``/`` are
+  not projects -- from there, nothing found in code is staged at all. A
+  path passed as an argument is the user's explicit choice and may be
+  anywhere. Credential files are refused in both cases, judged by the
+  path as written and by the real path behind every symbolic link in it,
+  **and inside a directory**: a member that looks like a credential is
+  left out, named in a warning and in the plan, and the rest of the
+  directory is staged. Recognising a credential is a list of names
+  (``clustrix.staging.SENSITIVE_PATTERNS``) and one content check; a
+  secret in a file with an ordinary name is not recognised. ``no_data=[...]`` removes
   a path, and everything under it, whether it was named itself or is a
   member of a directory that was. Nothing the *cluster* says can widen
   this: there is no "the job asked for this file" channel.
@@ -73,6 +90,18 @@ What this does not do, on purpose
   200 GB is to find it on the cluster, not to fill a quota.
 * **It does not send data to a third party.** Transfers go over the
   existing SSH connection to the cluster's own filesystem.
+
+What it will not link
+---------------------
+
+A relative input is linked into each job directory under its own name, and
+clustrix writes files of its own there (``result.pkl``, ``job.sh``, ...:
+``clustrix.utils.RESERVED_JOB_DIRECTORY_NAMES``). An input whose first
+path component is one of those names is refused at submission.
+
+An input is staged read-only whether the function reads it or means to
+overwrite it; the two look the same from here. A job that fails writing
+to one raises its ``PermissionError`` with that explanation added.
 
 What it cannot see
 ------------------
@@ -91,6 +120,7 @@ other object are not searched and not rewritten: pass the path itself.
 import copy
 import logging
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -108,6 +138,7 @@ from .staging import (
     _format_bytes,
     _is_sensitive_target,
 )
+from .utils import is_reserved_job_directory_name
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +195,30 @@ _INCOMING = ".incoming-"
 #: error message on the same stream is not taken for an answer.
 _SIZE_MARK = "CLUSTRIX-SIZE"
 
+#: Brackets each answer :func:`_remote_listing` and :func:`_remote_hashes`
+#: read, for the same reason.
+_ANSWER_MARK = "CLUSTRIX-ANSWER"
+
+#: What an input already on the cluster is compared by.
+_COMPARED_BY = "sha256"
+
+#: Sets ``$H`` to the cluster's SHA-256 command, or to nothing.
+_FIND_REMOTE_HASHER = (
+    "if command -v sha256sum >/dev/null 2>&1; then H=sha256sum; "
+    'elif command -v shasum >/dev/null 2>&1; then H="shasum -a 256"; '
+    "else H=; fi"
+)
+
+#: Inputs found identical to what the cluster has at the same path, for the
+#: rest of this process: a 1 GB file is hashed on both sides once, not once
+#: per call. The key includes the local sizes and modification times, so a
+#: file edited here is compared again; a copy changed *on the cluster*
+#: between two calls of one session is not noticed.
+_SAME_IN_PLACE: Set[tuple] = set()
+
+#: SHA-256 of local files, by path, size and modification time.
+_LOCAL_SHA256: Dict[Tuple[str, int, int], str] = {}
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -188,6 +243,8 @@ class StagedInput:
     link: Optional[str] = None
     #: False when the copy is named by sizes and times: too big to read.
     identified_by_content: bool = True
+    #: Why ``how``: what was compared, or why nothing could be.
+    why: str = ""
 
 
 @dataclass
@@ -222,6 +279,7 @@ class DataPlan:
             lines.append(
                 f"{item.local} ({_format_bytes(item.size)}, from {item.found_in}): "
                 f"{item.how} -> {item.remote}"
+                + (f" ({item.why})" if item.why else "")
                 + ("" if item.identified_by_content else f" ({_BY_METADATA})")
             )
         lines.extend(self.skipped)
@@ -230,18 +288,40 @@ class DataPlan:
 
 _BY_METADATA = "identified by size and time, not content"
 
+_WILL_NOT_GUESS = (
+    "clustrix will not guess which is right: remove or rename one, or "
+    "exclude it with no_data=[...] to use the cluster's copy as it is."
+)
+
 
 # --------------------------------------------------------------------------
 # Discovery: local and pure
 # --------------------------------------------------------------------------
 
 
-def project_root(start: Optional[Path] = None) -> Path:
-    """The directory that bounds what code is allowed to name.
+def _too_wide_for_a_project(directory: Path) -> bool:
+    """True for the home directory, anything containing it, and ``/``."""
+    home = Path(os.path.realpath(Path.home()))
+    return (
+        directory == home
+        or directory in home.parents
+        or directory == Path(directory.anchor)
+    )
+
+
+def project_root(start: Optional[Path] = None) -> Optional[Path]:
+    """The directory that bounds what code is allowed to name, if there is one.
 
     The git top level containing the working directory, else the working
-    directory. A home directory or the filesystem root is too wide to be a
-    project, so those are narrowed to the working directory itself.
+    directory -- unless that is the home directory, a directory containing
+    it, or the filesystem root. None of those is a project: under a home
+    directory are ``~/.ssh``, ``~/.kaggle`` and every package installed with
+    ``pip install --user``, and "inside the project" would then describe a
+    token file named by a constant in somebody else's library. A git
+    checkout that wide (dotfiles kept in ``~``) is narrowed to the working
+    directory; a working directory that wide gives ``None``, and then
+    nothing found in code is staged -- only what the caller passed as an
+    argument or listed in ``data=[...]``.
     """
     here = (start or Path.cwd()).resolve()
     try:
@@ -254,9 +334,10 @@ def project_root(start: Optional[Path] = None) -> Path:
         root = Path(top.stdout.strip()).resolve() if top.returncode == 0 else here
     except (OSError, subprocess.SubprocessError):
         root = here
-    if root in (Path(root.anchor), Path.home().resolve()):
-        return here
-    return root
+    for directory in (root, here):
+        if not _too_wide_for_a_project(directory):
+            return directory
+    return None
 
 
 def _looks_like_a_path(text: str) -> bool:
@@ -303,12 +384,37 @@ def _paths_in_value(value: Any) -> Iterable[Tuple[Any, bool]]:
                 stack.extend((item, depth + 1) for item in current)
 
 
+#: Code under a directory with one of these names was installed, not
+#: written here, whatever directory the installation happens to be under
+#: (a virtual environment inside the project, ``~/.local/lib``).
+_INSTALLED_CODE_DIRECTORIES = frozenset({"site-packages", "dist-packages"})
+
+
+def _is_installed_code(value: Any) -> bool:
+    """True for a function that came from an installed package."""
+    code = getattr(value, "__code__", None)
+    if code is None or code.co_filename.startswith("<"):
+        return False
+    filename = code.co_filename
+    try:
+        parts = Path(filename).resolve().parts
+    except (OSError, ValueError):
+        return True  # not somewhere a project's code is
+    return not _INSTALLED_CODE_DIRECTORIES.isdisjoint(parts)
+
+
 def _is_project_function(value: Any, root: Path) -> bool:
-    if not isinstance(value, types.FunctionType):
+    """Whether the paths ``value``'s code names are the user's own words.
+
+    A script, a notebook cell or an ``exec``'d definition is; so is a
+    function whose file is inside the project. Installed code is not, even
+    when the project directory contains the installation.
+    """
+    if not isinstance(value, types.FunctionType) or _is_installed_code(value):
         return False
     filename = value.__code__.co_filename
     if value.__module__ == "__main__" or filename.startswith("<"):
-        return True  # a script, a notebook cell, an exec'd definition
+        return True
     try:
         return Path(filename).resolve().is_relative_to(root)
     except (OSError, ValueError):
@@ -411,8 +517,18 @@ def discover(
                 add(text, f"argument {name!r}", True)
 
     # The function, the project-local functions it calls, and their globals.
+    # Without a project there is no code whose constants are the caller's
+    # own choice of file, and a decorated library function never was.
     root = project_root()
-    pending: List[Any] = [func]
+    if root is None:
+        logger.info(
+            "No paths are looked for in code: the working directory (%s) is "
+            "the home directory or contains it, which is not a project. "
+            "Inputs passed as arguments or in data=[...] are still staged.",
+            Path.cwd(),
+        )
+        return list(found.values())
+    pending: List[Any] = [] if _is_installed_code(func) else [func]
     visited: Set[int] = set()
     while pending and len(visited) < _MAX_FUNCTIONS:
         current = pending.pop()
@@ -496,7 +612,7 @@ def _files_under(
     return sorted(files)
 
 
-def _too_wide(candidate: Candidate, root: Path) -> Optional[str]:
+def _too_wide(candidate: Candidate, root: Optional[Path]) -> Optional[str]:
     """What ``candidate`` is, if it is a directory no call means to send."""
     if not candidate.path.is_dir():
         return None
@@ -509,7 +625,7 @@ def _too_wide(candidate: Candidate, root: Path) -> Optional[str]:
         return "the working directory"
     if real == home:
         return "the home directory"
-    if real in root.parents:
+    if root is not None and real in root.parents:
         return "a directory that contains the project"
     if real in home.parents:
         return "a directory that contains the home directory"
@@ -518,11 +634,13 @@ def _too_wide(candidate: Candidate, root: Path) -> Optional[str]:
     return None
 
 
-def _refusal(candidate: Candidate, root: Path) -> Optional[str]:
+def _refusal(candidate: Candidate, root: Optional[Path]) -> Optional[str]:
     """Why ``candidate`` may not be uploaded, or ``None`` if it may."""
     path = candidate.path
     if _is_sensitive_target(path):
-        return f"{path} looks like a credential and is never uploaded"
+        real = os.path.realpath(path)
+        through = "" if real == str(path) else f" (it is {real})"
+        return f"{path}{through} looks like a credential and is never uploaded"
     if not (path.is_file() or path.is_dir()):
         return f"{path} is not a regular file or directory"
     too_wide = _too_wide(candidate, root)
@@ -533,6 +651,12 @@ def _refusal(candidate: Candidate, root: Path) -> Optional[str]:
             "directories the job needs (as arguments or in data=[...])"
         )
     if not candidate.explicit:
+        if root is None:
+            return (
+                f"{path} ({candidate.found_in}) was named in code, and there "
+                "is no project directory to bound what code may name; pass "
+                "it as an argument or list it in data=[...]"
+            )
         resolved = Path(os.path.realpath(path))
         if not resolved.is_relative_to(root):
             return (
@@ -609,6 +733,297 @@ def _remote_sizes(connection, paths: Sequence[str]) -> Dict[str, Optional[int]]:
             + ", ".join(unanswered[:5])
         )
     return {path: answers[index] for index, path in enumerate(paths)}
+
+
+def _answers(output: str) -> Dict[int, Tuple[List[str], str]]:
+    """Split a marked remote reply into ``{index: (lines, exit status)}``.
+
+    Only an answer with both its opening and closing mark is returned, so a
+    reply cut short reads as no answer rather than as a short one.
+    """
+    answers: Dict[int, Tuple[List[str], str]] = {}
+    index: Optional[int] = None
+    lines: List[str] = []
+    for line in output.splitlines():
+        words = line.split()
+        if len(words) >= 3 and words[0] == _ANSWER_MARK and words[1].isdigit():
+            if words[2] == "BEGIN":
+                index, lines = int(words[1]), []
+            elif words[2] == "END" and index == int(words[1]) and len(words) == 4:
+                answers[index] = (lines, words[3])
+                index = None
+        elif index is not None:
+            lines.append(line)
+    return answers
+
+
+def _prune_never_staged() -> str:
+    """``find`` arguments that skip what a staged directory never holds."""
+    names = " -o ".join(
+        f"-name {shlex.quote(name)}" for name in sorted(_NEVER_STAGED_DIRECTORIES)
+    )
+    return f"-type d \\( {names} \\) -prune -o -type f"
+
+
+def _remote_listing(
+    connection, directories: Sequence[str]
+) -> Dict[str, Optional[Dict[str, int]]]:
+    """``{relative path: size}`` of the files under each remote directory.
+
+    ``None`` for a directory whose listing could not be had or read back
+    whole -- a member the account cannot read, a file name with a newline in
+    it. One round trip for all of them.
+    """
+    if not directories:
+        return {}
+    script = "; ".join(
+        f"echo {_ANSWER_MARK} {index} BEGIN; "
+        f"(cd {shlex.quote(directory)} && find . {_prune_never_staged()} "
+        "-exec wc -c {} +) 2>/dev/null; "
+        f"echo {_ANSWER_MARK} {index} END $?"
+        for index, directory in enumerate(directories)
+    )
+    output, _ = connection.execute_remote_command(script)
+    answers = _answers(output)
+    listings: Dict[str, Optional[Dict[str, int]]] = {}
+    for index, directory in enumerate(directories):
+        lines, status = answers.get(index, ([], "missing"))
+        listing: Optional[Dict[str, int]] = {} if status == "0" else None
+        for line in lines:
+            match = re.match(r"\s*(\d+) (.*)\Z", line)
+            if listing is None or (match and match.group(2) == "total"):
+                continue
+            if not match or not match.group(2).startswith("./"):
+                listing = None
+                continue
+            listing[match.group(2)[2:]] = int(match.group(1))
+        listings[directory] = listing
+    return listings
+
+
+def _remote_hashes(
+    connection, paths: Sequence[Tuple[str, bool]]
+) -> Dict[str, Optional[Dict[str, str]]]:
+    """SHA-256 of each remote ``(path, is a directory)``, computed there.
+
+    ``{"": digest}`` for a file, ``{relative path: digest}`` for the files
+    under a directory, and ``None`` when the cluster has no SHA-256 command
+    or the answer could not be read back whole. One round trip.
+    """
+    if not paths:
+        return {}
+    commands = [_FIND_REMOTE_HASHER]
+    for index, (path, is_directory) in enumerate(paths):
+        quoted = shlex.quote(path)
+        hashing = (
+            f"(cd {quoted} && find . {_prune_never_staged()} -exec $H {{}} +)"
+            if is_directory
+            else f"$H {quoted}"
+        )
+        commands.append(
+            f"echo {_ANSWER_MARK} {index} BEGIN; "
+            f'if [ -n "$H" ]; then {hashing} 2>/dev/null; else false; fi; '
+            f"echo {_ANSWER_MARK} {index} END $?"
+        )
+    output, _ = connection.execute_remote_command("; ".join(commands))
+    answers = _answers(output)
+    hashes: Dict[str, Optional[Dict[str, str]]] = {}
+    for index, (path, is_directory) in enumerate(paths):
+        lines, status = answers.get(index, ([], "missing"))
+        found: Optional[Dict[str, str]] = {} if status == "0" else None
+        for line in lines:
+            # ``<digest>  <name>``; a leading backslash marks an escaped name.
+            match = re.match(r"(\\?)([0-9a-f]{64}) [ *](.*)\Z", line)
+            if found is None:
+                continue
+            if not match or match.group(1):
+                found = None
+                continue
+            name = match.group(3)
+            if not is_directory:
+                found[""] = match.group(2)
+            elif name.startswith("./"):
+                found[name[2:]] = match.group(2)
+            else:
+                found = None
+        hashes[path] = found
+    return hashes
+
+
+def _local_sha256(file: Path) -> str:
+    stat = file.stat()
+    key = (str(file), stat.st_size, stat.st_mtime_ns)
+    if key not in _LOCAL_SHA256:
+        _LOCAL_SHA256[key] = _digest_file(file, _COMPARED_BY)
+    return _LOCAL_SHA256[key]
+
+
+@dataclass
+class _Comparison:
+    """What comparing a local input with the cluster's same path found."""
+
+    #: ``True`` identical, ``False`` different, ``None`` could not be told.
+    same: Optional[bool]
+    detail: str
+
+
+def _compare_in_place(
+    connection,
+    candidates: Sequence[Tuple[Candidate, List[Tuple[str, Path]], int]],
+) -> Dict[Path, _Comparison]:
+    """Whether the cluster holds each candidate's data at the same path.
+
+    Every candidate here exists on the cluster at its own absolute path --
+    a file of the same size, or a directory. That is where a shared
+    filesystem shows up, and also where a different dataset that merely
+    lives at the same path does, so the path is not taken as evidence:
+
+    * a file is the same when its SHA-256 is;
+    * a directory is the same when it holds the same files -- apart from
+      those left out here (credentials, ``no_data``, links), which may be
+      there too -- each with the same size and the same SHA-256.
+
+    Sizes are compared before anything is hashed, so a different dataset is
+    usually found without reading it. Three round trips at most, however
+    many candidates there are, and none for an input already compared in
+    this process.
+    """
+    where = _connection_key(connection)
+    verdicts: Dict[Path, _Comparison] = {}
+    keys: Dict[Path, tuple] = {}
+    for candidate, files, _ in candidates:
+        described = [
+            (relative, file.stat().st_size, file.stat().st_mtime_ns)
+            for relative, file in files
+        ]
+        keys[candidate.path] = (where, str(candidate.path), tuple(described))
+        if keys[candidate.path] in _SAME_IN_PLACE:
+            verdicts[candidate.path] = _Comparison(
+                True, f"same {_COMPARED_BY}, compared earlier in this session"
+            )
+    pending = [entry for entry in candidates if entry[0].path not in verdicts]
+
+    directories = [str(c.path) for c, _, _ in pending if c.path.is_dir()]
+    listings = _remote_listing(connection, directories)
+    to_hash: List[Tuple[Candidate, List[Tuple[str, Path]]]] = []
+    for candidate, files, _ in pending:
+        if not candidate.path.is_dir():
+            to_hash.append((candidate, files))
+            continue
+        listing = listings[str(candidate.path)]
+        if listing is None:
+            verdicts[candidate.path] = _Comparison(
+                None, "the cluster's copy could not be listed"
+            )
+            continue
+        differences = _listing_differences(
+            {relative: file.stat().st_size for relative, file in files},
+            listing,
+            # Present here and not staged: left out, not different.
+            lambda relative: os.path.lexists(candidate.path / relative),
+        )
+        if differences:
+            verdicts[candidate.path] = _Comparison(False, _some(differences))
+        else:
+            to_hash.append((candidate, files))
+
+    hashes = _remote_hashes(
+        connection, [(str(c.path), c.path.is_dir()) for c, _ in to_hash]
+    )
+    for candidate, files in to_hash:
+        remote = hashes[str(candidate.path)]
+        if remote is None:
+            verdicts[candidate.path] = _Comparison(
+                None, f"the cluster could not compute a {_COMPARED_BY} of its copy"
+            )
+            continue
+        differences = [
+            f"{relative or candidate.path.name} has different content"
+            for relative, file in files
+            if remote.get(relative) != _local_sha256(file)
+        ]
+        if differences:
+            verdicts[candidate.path] = _Comparison(False, _some(differences))
+        else:
+            _SAME_IN_PLACE.add(keys[candidate.path])
+            verdicts[candidate.path] = _Comparison(
+                True,
+                (
+                    f"same size and {_COMPARED_BY}"
+                    if not candidate.path.is_dir()
+                    else f"same {len(files)} file(s) by size and {_COMPARED_BY}"
+                ),
+            )
+    return verdicts
+
+
+def _listing_differences(
+    here: Dict[str, int],
+    there: Dict[str, int],
+    left_out_here: Callable[[str], bool],
+) -> List[str]:
+    """How two ``{relative path: size}`` listings of a directory differ.
+
+    A file only on the cluster is a difference unless ``left_out_here``
+    says this machine has it too and did not stage it.
+    """
+    differences = [
+        f"{relative} is not there" for relative in sorted(set(here) - set(there))
+    ]
+    differences += [
+        f"{relative} is only there"
+        for relative in sorted(set(there) - set(here))
+        if not left_out_here(relative)
+    ]
+    differences += [
+        f"{relative} is {_format_bytes(there[relative])} there and "
+        f"{_format_bytes(size)} here"
+        for relative, size in sorted(here.items())
+        if relative in there and there[relative] != size
+    ]
+    return differences
+
+
+def _some(differences: List[str], shown: int = 5) -> str:
+    more = len(differences) - shown
+    return "; ".join(differences[:shown]) + (f"; and {more} more" if more > 0 else "")
+
+
+def _connection_key(connection) -> tuple:
+    """Which account on which cluster a connection reaches."""
+    config = getattr(connection, "config", None)
+    return (
+        getattr(config, "cluster_host", None),
+        getattr(config, "cluster_port", None),
+        getattr(config, "username", None),
+    )
+
+
+def _private_store(connection, store: str) -> None:
+    """Create the store, readable by its owner and nobody else.
+
+    A local file that is ``0600`` must not become world-readable by being
+    copied to a cluster, where the other accounts are other people. The
+    store is ``0700`` whatever the remote umask says, and a store made by a
+    version that left it open is closed -- once: its mode is how that is
+    known.
+    """
+    quoted = shlex.quote(store)
+    connection.execute_remote_command(
+        f"umask 077; mkdir -p {quoted} && "
+        f'{{ [ "$(stat -c %a {quoted} 2>/dev/null)" = 700 ] '
+        f"|| chmod -R go-rwx {quoted}; }} && chmod 700 {quoted}",
+        check=True,
+    )
+
+
+def _reserved_link(candidate: Candidate) -> Optional[str]:
+    """The file of clustrix's own that linking ``candidate`` would replace."""
+    link = _relative_link(candidate)
+    if link is None:
+        return None
+    top = PurePosixPath(link).parts[0]
+    return top if is_reserved_job_directory_name(top) else None
 
 
 def _relative_link(candidate: Candidate) -> Optional[str]:
@@ -765,14 +1180,16 @@ def _upload(
     created = False
     try:
         connection.execute_remote_command(
-            "mkdir -p " + " ".join(shlex.quote(d) for d in sorted(directories)),
+            "umask 077; mkdir -p "
+            + " ".join(shlex.quote(d) for d in sorted(directories)),
             check=True,
         )
         created = True
         _send_files(connection, targets)
         connection.execute_remote_command(
-            f"touch {quoted_incoming}/{_COMPLETE} && chmod -R a-w {quoted_incoming} "
-            "|| exit 1; "
+            # Read-only and the owner's alone: directories 0500, files 0400.
+            f"touch {quoted_incoming}/{_COMPLETE} "
+            f"&& chmod -R u=rX,go= {quoted_incoming} || exit 1; "
             # A directory here without the mark is not a finished copy.
             f"if [ -e {quoted_final} ] && [ ! -e {quoted_final}/{_COMPLETE} ]; "
             f"then mv {quoted_final} {quoted_incoming}.stale "
@@ -866,20 +1283,62 @@ def prepare(
     if not candidates:
         return args, kwargs, plan
 
-    # Already on the cluster at the same path? Then nothing moves.
+    # Refused before anything is copied: linked into the job directory under
+    # one of these names, the input would take the place of a file clustrix
+    # writes there, and the job would fail on it with a bare PermissionError.
+    reserved = [
+        f"{candidate.written!r} ({candidate.found_in}) would be linked into "
+        f"the job directory as {_reserved_link(candidate)!r}"
+        for candidate, _, _ in candidates
+        if _reserved_link(candidate)
+    ]
+    if reserved:
+        raise StagingError(
+            "An input's name collides with a file clustrix itself writes in "
+            "every job directory: " + "; ".join(reserved) + ". Rename the "
+            "input, pass it by an absolute path, or keep it out with "
+            "no_data=[...]."
+        )
+
+    # Already on the cluster at the same path? Then nothing moves -- once
+    # it has been shown to be the same data, not merely the same path.
     present = _remote_sizes(connection, [str(c.path) for c, _, _ in candidates])
     to_upload: List[Tuple[Candidate, List[Tuple[str, Path]], int]] = []
+    reasons: Dict[Path, str] = {}
+    there: List[Tuple[Candidate, List[Tuple[str, Path]], int]] = []
     for candidate, files, size in candidates:
         remote_size = present[str(candidate.path)]
         if remote_size is None:
             to_upload.append((candidate, files, size))
+            reasons[candidate.path] = "not readable at that path on the cluster"
         elif candidate.path.is_file() and remote_size != size:
             raise StagingError(
                 f"{candidate.path} exists on the cluster too, but as a "
                 f"different file ({_format_bytes(remote_size)} there, "
-                f"{_format_bytes(size)} here). clustrix will not guess which "
-                "is right: remove or rename one, or exclude it with "
-                "no_data=[...] to use the cluster's copy as it is."
+                f"{_format_bytes(size)} here). {_WILL_NOT_GUESS}"
+            )
+        elif candidate.path.is_file() != (remote_size != -1):
+            raise StagingError(
+                f"{candidate.path} is a "
+                f"{'file' if candidate.path.is_file() else 'directory'} here "
+                f"and a {'directory' if remote_size == -1 else 'file'} on the "
+                f"cluster. {_WILL_NOT_GUESS}"
+            )
+        else:
+            there.append((candidate, files, size))
+    compared = _compare_in_place(connection, there)
+    for candidate, files, size in there:
+        verdict = compared[candidate.path]
+        if verdict.same is None:
+            # No evidence either way is not evidence that it is the same.
+            to_upload.append((candidate, files, size))
+            reasons[candidate.path] = (
+                f"something is at that path on the cluster, but {verdict.detail}"
+            )
+        elif not verdict.same:
+            raise StagingError(
+                f"{candidate.path} exists on the cluster too, but it is not "
+                f"the same data: {verdict.detail}. {_WILL_NOT_GUESS}"
             )
         else:
             # The job does not run in this working directory, so a path
@@ -892,6 +1351,7 @@ def prepare(
                     size,
                     "in place",
                     candidate.found_in,
+                    why=f"the cluster has it at the same path: {verdict.detail}",
                     link=_relative_link(candidate),
                 )
             )
@@ -920,6 +1380,7 @@ def prepare(
             connection.resolve_remote_path(config.remote_work_dir).rstrip("/")
             + f"/{STORE_DIRECTORY}"
         )
+        _private_store(connection, store)
         complete = _remote_sizes(
             connection,
             [f"{store}/{identity}/{_COMPLETE}" for identity, _ in identities],
@@ -947,6 +1408,7 @@ def prepare(
                 size,
                 "already uploaded" if already else "uploaded",
                 candidate.found_in,
+                why=reasons[candidate.path],
                 link=link,
                 identified_by_content=by_content,
             )
@@ -963,17 +1425,54 @@ def prepare(
 
     for item in plan.inputs:
         logger.info(
-            "Input %s (%s): %s%s%s",
+            "Input %s (%s): %s%s%s%s",
             item.local,
             _format_bytes(item.size),
             item.how,
             "" if item.how == "in place" else f" as {item.remote}",
+            f" ({item.why})" if item.why else "",
             "" if item.identified_by_content else f" ({_BY_METADATA})",
         )
     if replacements:
         args = tuple(_rewritten(value, replacements) for value in args)
         kwargs = {key: _rewritten(value, replacements) for key, value in kwargs.items()}
     return args, kwargs, plan
+
+
+def staged_read_only(error: PermissionError, plan: DataPlan) -> Optional[str]:
+    """What to add to a job's ``PermissionError`` if a staged input caused it.
+
+    A path that exists here and is passed to a function looks the same
+    whether the function reads it or is about to overwrite it -- last run's
+    output file, say -- and it is staged as an input either way: a
+    read-only copy. Writing to it then fails on the cluster with a bare
+    ``Permission denied``, which says nothing about why a file the user can
+    write at home cannot be written there. Returns the sentence that does,
+    or ``None`` when the path in the error is not one this call staged.
+    """
+    for name in (error.filename, error.filename2):
+        if not isinstance(name, (str, os.PathLike)):
+            continue
+        failed = os.path.normpath(os.fspath(name))
+        for item in plan.inputs:
+            if item.how == "in place":
+                continue  # used where it is: nothing was made read-only
+            for staged in filter(None, (item.link, item.remote)):
+                absolute = os.path.isabs(staged)
+                if (
+                    failed == staged
+                    or failed.startswith(staged + "/")
+                    or (not absolute and failed.endswith("/" + staged))
+                    or (not absolute and f"/{staged}/" in failed)
+                ):
+                    written = item.link or str(item.local)
+                    return (
+                        f"{written} exists on this machine, so it was staged "
+                        "for the job as an input, and staged inputs are "
+                        "read-only. If the job writes it, keep it out with "
+                        f"@cluster(no_data=[{written!r}])"
+                    )
+    return None
 
 
 def link_into_job_directory(

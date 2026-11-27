@@ -349,6 +349,7 @@ def cluster(
                     # The local files this call names are put where its jobs
                     # can read them, before anything is serialized: an
                     # argument may come back pointing at the cluster's copy.
+                    data_plan = auto_stage.DataPlan()
                     if config.auto_stage and config.cluster_type in ("ssh", "slurm"):
                         executor.connect()
                         args, func_kwargs, data_plan = auto_stage.prepare(
@@ -362,29 +363,26 @@ def cluster(
                         )
                         job_config["data_links"] = data_plan.links
 
-                    if should_parallelize:
-                        loop_plan = _plan_for(func)
-                        if loop_plan.parallelizable and not _runs_undivided(func):
-                            return _run_split_remotely(
-                                loop_plan,
-                                executor,
-                                func,
-                                args,
-                                func_kwargs,
-                                job_config,
-                                config.max_parallel_jobs,
-                            )
-                        if not loop_plan.parallelizable:
-                            logger.info(
-                                "%s runs as one job.\n%s",
-                                getattr(func, "__name__", repr(func)),
-                                loop_plan.explain(),
-                            )
-
-                    # Execute normally on cluster
-                    return _execute_single(
-                        executor, func, args, func_kwargs, job_config
-                    )
+                    try:
+                        return _run_remotely(
+                            executor,
+                            func,
+                            args,
+                            func_kwargs,
+                            job_config,
+                            should_parallelize,
+                        )
+                    except PermissionError as error:
+                        note = auto_stage.staged_read_only(error, data_plan)
+                        if note is None:
+                            raise
+                        # The same exception, saying why: errno and filename
+                        # are kept for a caller that inspects them.
+                        raise PermissionError(
+                            error.errno,
+                            f"{error.strerror} ({note})",
+                            error.filename,
+                        ) from error
 
         # Store cluster config for access outside execution
         cluster_config = {
@@ -431,6 +429,36 @@ def _shared_async_executor(config):
         if _ASYNC_EXECUTOR is None:
             _ASYNC_EXECUTOR = AsyncClusterExecutor(config)
         return _ASYNC_EXECUTOR
+
+
+def _run_remotely(
+    executor: ClusterExecutor,
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    job_config: dict,
+    should_parallelize: bool,
+) -> Any:
+    """Run ``func`` on the cluster: its loop divided among jobs, or as one."""
+    if should_parallelize:
+        loop_plan = _plan_for(func)
+        if loop_plan.parallelizable and not _runs_undivided(func):
+            return _run_split_remotely(
+                loop_plan,
+                executor,
+                func,
+                args,
+                kwargs,
+                job_config,
+                executor.config.max_parallel_jobs,
+            )
+        if not loop_plan.parallelizable:
+            logger.info(
+                "%s runs as one job.\n%s",
+                getattr(func, "__name__", repr(func)),
+                loop_plan.explain(),
+            )
+    return _execute_single(executor, func, args, kwargs, job_config)
 
 
 def _execute_single(

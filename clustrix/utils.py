@@ -1217,6 +1217,55 @@ def _encode_by_value(obj: Any, local_modules: List[Any]) -> bytes:
 #: The name a job has when nothing better is known about it.
 DEFAULT_JOB_NAME = "clustrix"
 
+#: Files the submitting side writes into a job directory, by name. The
+#: submission code uses these constants; the generated job script writes
+#: the rest of ``RESERVED_JOB_DIRECTORY_NAMES``.
+JOB_SCRIPT_NAME = "job.sh"
+JOB_FUNCTION_DATA_NAME = "function_data.pkl"
+JOB_RESULT_KEY_NAME = ".clustrix_result_key"
+JOB_STDOUT_NAME = "job.out"
+JOB_STDERR_NAME = "job.err"
+JOB_EXIT_NAME = "job.exit"
+
+#: Every name clustrix creates at the top of a job directory. A job's input
+#: may not be linked there under one of them (``clustrix.auto_stage``): the
+#: link would replace the file, or the file the link. Kept here, beside the
+#: code that generates the job script, so the two change together;
+#: ``tests/real_world/test_auto_stage_real.py`` lists a real job directory
+#: against it.
+RESERVED_JOB_DIRECTORY_NAMES = frozenset(
+    {
+        JOB_SCRIPT_NAME,
+        JOB_FUNCTION_DATA_NAME,
+        JOB_RESULT_KEY_NAME,
+        JOB_STDOUT_NAME,
+        JOB_STDERR_NAME,
+        JOB_EXIT_NAME,
+        JOB_EXIT_NAME + ".tmp",
+        "function_deserialized.pkl",
+        "result_raw.pkl",
+        "result.pkl",
+        "result.pkl.hmac",
+        "error.pkl",
+        "error.pkl.hmac",
+        "clustrix_env_setup.sh",
+        "clustrix_requirements.txt",
+        "venv1_serialization",
+        "venv2_execution",
+    }
+)
+
+#: ``slurm-<job id>.out`` and ``.err``, which the scheduler writes there.
+RESERVED_JOB_DIRECTORY_PATTERN = re.compile(r"\Aslurm-.*\.(out|err)\Z")
+
+
+def is_reserved_job_directory_name(name: str) -> bool:
+    """Whether clustrix or the scheduler writes ``name`` in a job directory."""
+    return name in RESERVED_JOB_DIRECTORY_NAMES or bool(
+        RESERVED_JOB_DIRECTORY_PATTERN.match(name)
+    )
+
+
 #: Longest name given to a scheduler. SLURM accepts far more, but ``squeue``
 #: shows eight characters by default and ``sacct`` ten; past a few dozen
 #: nobody is reading it.

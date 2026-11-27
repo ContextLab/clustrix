@@ -692,3 +692,141 @@ def test_a_relative_path_works_when_the_cluster_shares_the_disk(shared_project):
     assert real == str(shared_project / "data" / "table.csv"), "used where it is"
     assert as_argument("data/table.csv") == "a,b\n1,2\n"
     assert _remote(f"ls -A {WORK_DIR}/data 2>/dev/null").stdout.split() == []
+
+
+# -- #176 ---------------------------------------------------------------------
+
+
+def _mode(path: str) -> str:
+    return _remote(f"stat -c %a {path}").stdout.strip()
+
+
+def test_the_store_is_the_owners_alone(project, cluster_connection):
+    """S3. A local 0600 file landed 0444 inside 0755 directories: readable
+    by every account on the cluster."""
+    connection, config = cluster_connection
+    table = project / "data" / "table.csv"
+    table.chmod(0o600)
+
+    _, _, plan = auto_stage.prepare(
+        connection, config, reads, (str(table), "data/subjects"), {}
+    )
+
+    store = connection.resolve_remote_path(WORK_DIR) + "/data"
+    assert _mode(store) == "700"
+    modes = _remote(f"find {store} -mindepth 1 -printf '%y %m\\n' | sort | uniq -c")
+    assert sorted(line.split()[1:] for line in modes.stdout.splitlines()) == [
+        ["d", "500"],
+        ["f", "400"],
+    ], modes.stdout
+    assert _remote_text(plan.inputs[0].remote) == "a,b\n1,2\n"
+
+
+def test_a_store_left_open_by_an_earlier_version_is_closed(project, cluster_connection):
+    connection, config = cluster_connection
+    store = connection.resolve_remote_path(WORK_DIR) + "/data"
+    _remote(
+        f"mkdir -p {store}/0123456789abcdef0123/old && "
+        f"echo old > {store}/0123456789abcdef0123/old/f.txt && "
+        f"chmod 444 {store}/0123456789abcdef0123/old/f.txt && "
+        f"chmod 555 {store}/0123456789abcdef0123/old {store}/0123456789abcdef0123 && "
+        f"chmod 755 {store}"
+    )
+    assert _mode(f"{store}/0123456789abcdef0123/old/f.txt") == "444"
+
+    auto_stage.prepare(connection, config, reads_the_table, (), {})
+
+    assert _mode(store) == "700"
+    assert _mode(f"{store}/0123456789abcdef0123") == "500"
+    assert _mode(f"{store}/0123456789abcdef0123/old/f.txt") == "400"
+
+
+def test_a_private_key_behind_a_linked_directory_never_reaches_the_cluster(
+    project, cluster_connection, tmp_path, caplog
+):
+    """S2, end to end: ``keys -> .../.ssh``."""
+    connection, config = cluster_connection
+    ssh = tmp_path / "home" / ".ssh"
+    ssh.mkdir(parents=True)
+    (ssh / "aws-prod").write_text("PRIVATE KEY MATERIAL aws-prod\n")
+    (project / "keys").symlink_to(ssh)
+
+    with caplog.at_level("WARNING", logger="clustrix.auto_stage"):
+        _, _, plan = auto_stage.prepare(
+            connection, config, reads, ("keys/aws-prod",), {}
+        )
+        _, _, folder = auto_stage.prepare(connection, config, reads, ("keys",), {})
+
+    assert plan.inputs == [] and folder.inputs == []
+    assert caplog.text.count("looks like a credential") == 2
+    found = _remote(f"grep -rl 'PRIVATE KEY MATERIAL' {WORK_DIR}/ 2>/dev/null")
+    assert found.stdout.strip() == ""
+
+
+def test_everything_in_a_finished_job_directory_has_a_reserved_name(backend):
+    """S5's list is only as good as it is complete. This is a real job
+    directory, listed after the job ran."""
+    from clustrix.utils import is_reserved_job_directory_name
+
+    configure(cleanup_on_success=False)
+
+    @cluster(parallel=False, **RESOURCES)
+    def where():
+        import os
+
+        return os.getcwd()
+
+    job_dir = where()
+
+    names = _remote(f"ls -A {job_dir}").stdout.split()
+    assert {"job.sh", "function_data.pkl", "result.pkl"} <= set(names)
+    assert [n for n in names if not is_reserved_job_directory_name(n)] == []
+    _remote(f"rm -rf {job_dir}")
+
+
+def test_an_input_named_like_a_job_file_is_refused_before_anything_is_sent(
+    backend, project
+):
+    (project / "result.pkl").write_bytes(b"an old result")
+
+    @cluster(parallel=False, **RESOURCES)
+    def load(path):
+        return open(path, "rb").read()
+
+    before = _remote(f"ls -A {WORK_DIR}").stdout
+    with pytest.raises(StagingError) as refused:
+        load("result.pkl")
+
+    assert "'result.pkl'" in str(refused.value) and "collides" in str(refused.value)
+    assert _remote(f"ls -A {WORK_DIR}").stdout == before, "no job was started"
+
+
+def test_a_job_that_writes_to_a_staged_input_is_told_why_it_could_not(backend, project):
+    """S6. An output file left by an earlier run is an existing path among
+    the arguments: staged, read-only."""
+    (project / "data" / "out.txt").write_text("old run")
+
+    @cluster(parallel=False, **RESOURCES)
+    def write(out_path):
+        with open(out_path, "w") as handle:
+            handle.write("new")
+        return "wrote"
+
+    with pytest.raises(PermissionError) as failed:
+        write("data/out.txt")
+
+    message = str(failed.value)
+    assert failed.value.errno == 13 and failed.value.filename == "data/out.txt"
+    assert "staged" in message and "read-only" in message
+    assert "@cluster(no_data=['data/out.txt'])" in message
+
+    @cluster(parallel=False, no_data=["data/out.txt"], **RESOURCES)
+    def write_unstaged(out_path):
+        import os
+
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w") as handle:
+            handle.write("new")
+        return "wrote"
+
+    assert write_unstaged("data/out.txt") == "wrote"
