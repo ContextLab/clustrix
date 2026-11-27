@@ -790,14 +790,6 @@ class TestOverARealConnection:
             )
             assert executor.wait_for_result(job_id) == 42
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=RuntimeError,
-        reason="ClusterExecutor.execute() pickles the function with a bare "
-        "cloudpickle.dumps instead of serialize_function, so a function "
-        "defined in a local module is sent by reference and the worker "
-        "fails with ModuleNotFoundError. The fix is in executor_core.py.",
-    )
     def test_execute_ships_a_local_module_function_by_value_too(self, ssh_server):
         config = _real_config(
             ssh_server,

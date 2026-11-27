@@ -7,7 +7,6 @@ for the supported job execution backends: local, ssh, slurm and huggingface.
 import shlex
 import time
 import tempfile
-import pickle
 import logging
 from typing import Any, Dict, Optional
 
@@ -364,16 +363,24 @@ class ClusterExecutor:
         self.connection_manager.disconnect()
 
     def execute(self, func, args: tuple, kwargs: dict) -> Any:
-        """Execute function on cluster (simplified interface for tests)."""
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
-        func_data = {
-            "function": cloudpickle.dumps(func, protocol=4),
-            "args": pickle.dumps(args, protocol=4),
-            "kwargs": pickle.dumps(kwargs, protocol=4),
-            "requirements": {},
-        }
+        """Run ``func(*args, **kwargs)`` as one job and return its result.
 
-        job_id = self.submit_job(func_data, job_config)
+        The function goes through ``serialize_function``, as a ``@cluster``
+        call's does. It used to be pickled here with a bare
+        ``cloudpickle.dumps`` and no requirements, so a function from a
+        project module was sent by reference and failed on the worker with
+        ``ModuleNotFoundError``, and the job asked for a hardcoded 4 cores
+        and 8GB whatever the configuration said.
+        """
+        from .utils import serialize_function
+
+        job_config = {
+            "cores": self.config.default_cores,
+            "memory": self.config.default_memory,
+            "time": self.config.default_time,
+            "partition": self.config.default_partition,
+        }
+        job_id = self.submit_job(serialize_function(func, args, kwargs), job_config)
         return self.wait_for_result(job_id)
 
     def __enter__(self) -> "ClusterExecutor":
